@@ -158,8 +158,11 @@ class TryOnWindow(QMainWindow):
         self.viewer.update()
 
     def compute_matrix(self, rvec, tvec, prefix, ai=False):
-        def val(n): return self.sliders[f"{prefix}_{n}"]['obj'].value() * self.sliders[f"{prefix}_{n}"]['scale']
+        # Helper to get value from slider * scale
+        def val(n): 
+            return self.sliders[f"{prefix}_{n}"]['obj'].value() * self.sliders[f"{prefix}_{n}"]['scale']
         
+        # 1. Base Transformation (From AI or Identity)
         if ai:
             R, _ = cv2.Rodrigues(rvec)
             T_base = np.eye(4, dtype=np.float32)
@@ -168,27 +171,49 @@ class TryOnWindow(QMainWindow):
         else: 
             T_base = np.eye(4, dtype=np.float32)
             
+        # 2. Coordinate Conversion (OpenCV -> OpenGL)
+        # OpenCV looks down +Z, OpenGL looks down -Z. We flip Y and Z.
         cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
         
-        S = np.diag([val("Scale")] * 3 + [1.0])
+        # 3. Manual Scaling
+        scale_val = val("Scale")
+        S = np.diag([scale_val, scale_val, scale_val, 1.0]).astype(np.float32)
         
+        # 4. Manual Rotation
         rx, ry, rz = np.radians(val("Rot X")), np.radians(val("Rot Y")), np.radians(val("Rot Z"))
-        # Simplified Rotation construction
-        # ... (Rotation Matrix Math similar to original) ...
-        # For brevity, assuming standard Euler logic here or re-using your math helper
         
-        # Simple Matrix Multiplication place holder
-        M_rot = np.eye(4, dtype=np.float32) # Implement rotation math here
+        # Rotation X
+        c, s = np.cos(rx), np.sin(rx)
+        Rx = np.array([[1, 0, 0], [0, c, -s], [0, s, c]], dtype=np.float32)
         
+        # Rotation Y
+        c, s = np.cos(ry), np.sin(ry)
+        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=np.float32)
+        
+        # Rotation Z
+        c, s = np.cos(rz), np.sin(rz)
+        Rz = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
+        
+        # --- THE FIX: TRY SWAPPING THIS ORDER ---
+        # Old: M_rot_3x3 = Rz @ Ry @ Rx
+        # New: Rx @ Ry @ Rz 
+        M_rot_3x3 = Rx @ Ry @ Rz 
+        
+        M_rot = np.eye(4, dtype=np.float32)
+        M_rot[:3, :3] = M_rot_3x3
+        
+        # 5. Manual Translation (Position)
         tx, ty, tz = val("Pos X"), val("Pos Y"), val("Pos Z")
-        if not ai: tz -= 30.0 
+        if not ai: 
+            tz -= 30.0 # Default push-back for manual mode so it's visible
         
         T_off = np.eye(4, dtype=np.float32)
         T_off[:3, 3] = [tx, ty, tz]
         
-        # Combine
-        return cv_to_gl @ T_base @ T_off @ S # Simplified order
-
+        # 6. Final Multiplication Order
+        # Scale -> Rotate -> Translate -> Base(AI) -> FixCoords
+        return cv_to_gl @ T_base @ T_off @ M_rot @ S
+    
     def save_settings(self):
         """Iterates through all sliders and saves their raw integer values to JSON."""
         settings_data = {}

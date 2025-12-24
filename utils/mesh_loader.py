@@ -17,13 +17,24 @@ def load_mesh_data(path, is_occluder=False):
     try:
         mesh = trimesh.load(path, force='mesh')
         
-        # 1. Centering and Scaling
-        mesh.vertices -= mesh.centroid 
+        # Calculate the center of mass (centroid)
+        center = mesh.centroid
+        
+        # Move all vertices so the center becomes (0,0,0)
+        mesh.vertices -= center
+        
+        # --- SCALING FIX ---
+        # Normalize size so it fits in our view (approx 5 units wide)
         max_span = np.max(mesh.extents)
-        if max_span > 0: 
-            mesh.vertices /= max_span
-            mesh.vertices *= 5.0 # Standard size normalization
+        if max_span > 0:
+            mesh.vertices /= max_span  # Make it size 1.0
+            mesh.vertices *= 5.0       # Scale up to size 5.0
 
+        print(f"Loaded {path}")
+        print(f"Original Bounds: {mesh.bounds}")
+        mesh.vertices -= mesh.centroid
+        print(f"New Bounds (Should be centered around 0): {mesh.bounds}")
+        
         # 2. Extract Data
         verts = np.array(mesh.vertices, dtype=np.float32)
         

@@ -1,16 +1,16 @@
 {
-    "B_Scale": 228,
-    "B_Pos X": -39,
-    "B_Pos Y": -17,
-    "B_Pos Z": 39,
-    "B_Rot X": -4,
-    "B_Rot Y": 4,
-    "B_Rot Z": 18,
-    "H_Scale": 377,
+    "B_Scale": 108,
+    "B_Pos X": 6,
+    "B_Pos Y": -34,
+    "B_Pos Z": -6,
+    "B_Rot X": -180,
+    "B_Rot Y": -180,
+    "B_Rot Z": -180,
+    "H_Scale": 383,
     "H_Pos X": -17,
     "H_Pos Y": -45,
-    "H_Pos Z": -11,
-    "H_Rot X": -2,
-    "H_Rot Y": 0,
-    "H_Rot Z": 0
+    "H_Pos Z": -39,
+    "H_Rot X": -180,
+    "H_Rot Y": 180,
+    "H_Rot Z": -180
 }
