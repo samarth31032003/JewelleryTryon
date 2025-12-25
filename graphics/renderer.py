@@ -44,6 +44,12 @@ class ARViewerWidget(QOpenGLWidget):
         self.diffuse_str = 0.8
         self.w_w, self.w_h = 800, 600
 
+        # camera settings
+        self.cam_w = 640
+        self.cam_h = 480
+        self.img_aspect = 640/480
+        self.viewport_rect = (0, 0, 640, 480) # x, y, w, h
+
     def initializeGL(self):
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_BLEND)
@@ -140,18 +146,54 @@ class ARViewerWidget(QOpenGLWidget):
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(12))
 
     def resizeGL(self, w, h):
-        glViewport(0, 0, w, h)
-        self.w_w, self.w_h = w, h
-        self.update_projection()
+        """Calculates a centered viewport that maintains aspect ratio."""
+        if h == 0: h = 1 # Prevent divide by zero
+        win_aspect = w / h
+        
+        # Calculate new viewport (Black bars logic)
+        if win_aspect > self.img_aspect:
+            # Window is too wide (black bars on sides)
+            new_h = h
+            new_w = int(h * self.img_aspect)
+            x_offset = (w - new_w) // 2
+            y_offset = 0
+        else:
+            # Window is too tall (black bars on top/bottom)
+            new_w = w
+            new_h = int(w / self.img_aspect)
+            x_offset = 0
+            y_offset = (h - new_h) // 2
+            
+        self.viewport_rect = (x_offset, y_offset, new_w, new_h)
 
-    def update_projection(self):
-        aspect = self.w_w / self.w_h if self.w_h > 0 else 1.0
+    def update_projection(self, aspect_ratio=None):
+        if aspect_ratio is None: aspect_ratio = self.img_aspect
+        
+        # fov is stored in self.fov (controlled by slider)
+        # Convert FOV to radians
         f = 1.0 / np.tan(np.radians(self.fov) / 2.0)
         zn, zf = self.near_plane, self.far_plane
-        self.proj = np.array([[f/aspect,0,0,0], [0,f,0,0], [0,0,(zf+zn)/(zn-zf),(2*zf*zn)/(zn-zf)], [0,0,-1,0]], dtype=np.float32)
+        
+        # Standard Perspective Matrix
+        self.proj = np.array([
+            [f / aspect_ratio, 0, 0, 0],
+            [0, f, 0, 0],
+            [0, 0, (zf + zn) / (zn - zf), (2 * zf * zn) / (zn - zf)],
+            [0, 0, -1, 0]
+        ], dtype=np.float32)
 
     def paintGL(self):
+        # 1. Clear the WHOLE window (including black bars)
+        glViewport(0, 0, self.width(), self.height())
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        # 2. Set Viewport to the "Camera Box" only
+        vx, vy, vw, vh = self.viewport_rect
+        glViewport(vx, vy, vw, vh)
+        
+        # 3. Update Projection to match this new box
+        # IMPORTANT: The Aspect Ratio sent to the projection matrix must match the IMAGE, not the Window.
+        self.update_projection(aspect_ratio=self.img_aspect)
         
         # 1. Draw Background
         if self.camera_ready:
@@ -266,7 +308,13 @@ class ARViewerWidget(QOpenGLWidget):
     def update_bg(self, frame):
         if frame is None: return
         f = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # 1. Update Camera Dimensions (Run once or if changed)
         h, w, _ = f.shape
+        if self.cam_w != w or self.cam_h != h:
+            self.cam_w, self.cam_h = w, h
+            self.img_aspect = w / h
+            # Recalculate viewport immediately
+            self.resizeGL(self.width(), self.height())
         self.makeCurrent()
         if not self.cam_tex_id: self.cam_tex_id = glGenTextures(1)
         glBindTexture(GL_TEXTURE_2D, self.cam_tex_id)

@@ -31,7 +31,12 @@ class TryOnWindow(QMainWindow):
         self.timer.start(30)
         
         self.load_settings()
-
+        
+        # Get Native Resolution
+        w = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        h = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        print(f"CAMERA NATIVE RES: {w} x {h} (Ratio: {w/h:.2f})")
+        
         # schedule it to run immediately *after* the event loop starts and window is ready.
         QTimer.singleShot(100, self.load_default_occluder)
 
@@ -99,6 +104,29 @@ class TryOnWindow(QMainWindow):
         o_lay.addStretch(); tabs.addTab(tab_occ, "Occluder")
 
         p_layout.addWidget(tabs)
+        
+        # --- TAB 3: CAMERA / LENS ---
+        tab_cam = QWidget(); c_lay = QVBoxLayout(tab_cam)
+        
+        # FOV Slider (The Focal Length Tuner)
+        # Range: 20 to 120 degrees. Default for webcams is usually around 40-60.
+        cam_grid = QGridLayout()
+        cam_params = [
+            ("FOV", 20, 120, 45, 1.0), 
+            # Note: 45 is a safe starting guess for most webcams
+        ]
+        self.add_sliders("Cam", cam_params, cam_grid, self.update_camera_params)
+        
+        grp_cam = QGroupBox("Lens Tuning"); grp_cam.setLayout(cam_grid)
+        c_lay.addWidget(grp_cam)
+        c_lay.addStretch()
+        tabs.addTab(tab_cam, "Camera")
+        
+    def update_camera_params(self):
+        # Callback when slider moves
+        fov_val = self.sliders["Cam_FOV"]['obj'].value()
+        self.viewer.fov = fov_val
+        self.viewer.update() # Trigger repaint        
 
     def add_sliders(self, prefix, params, layout, callback=None):
         for i, (n, min_v, max_v, def_v, scale) in enumerate(params):
@@ -143,11 +171,11 @@ class TryOnWindow(QMainWindow):
             
             if self.show_landmarks:
                 frame_disp = self.tracker.draw_debug(frame_disp)
-
+                
             if info['found']:
                 self.viewer.model_bracelet = self.compute_matrix(rvec, tvec, "B", ai=True)
                 self.viewer.model_occluder = self.compute_matrix(rvec, tvec, "H", ai=True)
-                self.txt.setText(f"Tracking... Depth: {info['z_depth']:.1f}")
+                self.txt.setText(f"Tracking: {info['hand']} Hand\nDepth: {info['z_depth']:.1f}")
             else: self.txt.setText("Searching...")
         else:
             self.viewer.model_bracelet = self.compute_matrix(None, None, "B", ai=False)

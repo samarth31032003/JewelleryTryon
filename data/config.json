@@ -6,11 +6,12 @@
     "B_Rot X": -180,
     "B_Rot Y": -180,
     "B_Rot Z": -180,
-    "H_Scale": 383,
-    "H_Pos X": -17,
-    "H_Pos Y": -45,
-    "H_Pos Z": -39,
-    "H_Rot X": -180,
-    "H_Rot Y": 180,
-    "H_Rot Z": -180
+    "H_Scale": 540,
+    "H_Pos X": 6,
+    "H_Pos Y": -39,
+    "H_Pos Z": -28,
+    "H_Rot X": -99,
+    "H_Rot Y": 87,
+    "H_Rot Z": 180,
+    "Cam_FOV": 40
 }
