@@ -70,14 +70,20 @@ class TryOnWindow(QMainWindow):
         
         grid = QGridLayout()
         params = [
-            ("Scale", 1, 500, 100, 0.01),      # 1 to 5x scale
-            ("Pos X", -500, 500, 0, 0.1),      # Moves -50 to +50 units (Was -5 to +5)
-            ("Pos Y", -500, 500, 0, 0.1),      # Moves -50 to +50 units
-            ("Pos Z", -500, 500, 0, 0.1),      # Moves -50 to +50 units
-            ("Rot X", -180, 180, 0, 1.0),      # Rotation is usually fine with 1.0 step
+            ("Scale", 1, 500, 100, 0.01),
+            # REMOVED Pos X and Pos Z!
+            # Renamed Pos Y to "Slide" (The 'Bead' movement)
+            ("Slide", -500, 500, 0, 0.5), 
+            ("Rot X", -180, 180, 0, 1.0),
             ("Rot Y", -180, 180, 0, 1.0),
             ("Rot Z", -180, 180, 0, 1.0)
         ]
+        
+        btn_reset = QPushButton("Reset Transform (Snap to Center)")
+        btn_reset.setStyleSheet("background-color: #AA4444; color: white; font-weight: bold;")
+        btn_reset.clicked.connect(self.reset_bracelet_transform)
+        t_lay.addWidget(btn_reset)
+        
         self.add_sliders("B", params, grid) 
         grp = QGroupBox("Bracelet Transform"); grp.setLayout(grid); t_lay.addWidget(grp)
         t_lay.addStretch(); tabs.addTab(tab_trans, "Bracelet")
@@ -85,6 +91,10 @@ class TryOnWindow(QMainWindow):
         # TAB 2: OCCLUDER
         tab_occ = QWidget(); o_lay = QVBoxLayout(tab_occ)
         btn_reload = QPushButton("Reload Hand Model"); btn_reload.clicked.connect(self.load_default_occluder); o_lay.addWidget(btn_reload)
+        btn_reset_occ = QPushButton("Reset Transform (Snap to Center)")
+        btn_reset_occ.setStyleSheet("background-color: #AA4444; color: white; font-weight: bold;")
+        btn_reset_occ.clicked.connect(self.reset_occluder_transform)
+        o_lay.addWidget(btn_reset_occ)
         chk_vis = QCheckBox("Debug: Show Hand Mesh (Red)"); chk_vis.setChecked(True)
         chk_vis.toggled.connect(lambda c: setattr(self.viewer, 'debug_occluder', c)); o_lay.addWidget(chk_vis)
         
@@ -158,6 +168,39 @@ class TryOnWindow(QMainWindow):
     def toggle_tracking_viz(self, c):
         self.show_landmarks = c
 
+    def reset_bracelet_transform(self):
+        """Resets all Bracelet sliders to their default values (0 for Pos/Rot, 100 for Scale)."""
+        print("Resetting Bracelet to Origin...")
+        
+        # Block signals so we don't trigger a re-render 7 times in a row
+        self.viewer.blockSignals(True)
+        
+        for key, info in self.sliders.items():
+            # Only reset the Bracelet (B_), not the Light (W_) or Hand (H_)
+            if key.startswith("B_"):
+                default_val = info['default']
+                slider_obj = info['obj']
+                slider_obj.setValue(default_val)
+        
+        self.viewer.blockSignals(False)
+        self.viewer.update() # Force one clean update
+
+    def reset_occluder_transform(self):
+        """Resets all Occluder sliders to their default values."""
+        print("Resetting Occluder to Origin...")
+        
+        self.viewer.blockSignals(True)
+        
+        for key, info in self.sliders.items():
+            # Only reset the Occluder (H_) sliders
+            if key.startswith("H_"):
+                default_val = info['default']
+                slider_obj = info['obj']
+                slider_obj.setValue(default_val)
+        
+        self.viewer.blockSignals(False)
+        self.viewer.update()
+
     def loop(self):
         ret, frame = self.cap.read()
         if not ret: return
@@ -173,10 +216,22 @@ class TryOnWindow(QMainWindow):
                 frame_disp = self.tracker.draw_debug(frame_disp)
                 
             if info['found']:
-                self.viewer.model_bracelet = self.compute_matrix(rvec, tvec, "B", ai=True)
-                self.viewer.model_occluder = self.compute_matrix(rvec, tvec, "H", ai=True)
+                # Check if it is a Left Hand
+                is_left = (info['hand'] == "Left")
+                
+                # PASS 'is_left' TO THE FUNCTION
+                self.viewer.model_bracelet = self.compute_matrix(
+                    rvec, tvec, "B", ai=True, is_left=is_left
+                )
+                
+                # Occluder also needs to know!
+                self.viewer.model_occluder = self.compute_matrix(
+                    rvec, tvec, "H", ai=True, is_left=is_left
+                )
+                
                 self.txt.setText(f"Tracking: {info['hand']} Hand\nDepth: {info['z_depth']:.1f}")
-            else: self.txt.setText("Searching...")
+            else: 
+                self.txt.setText("Searching...")
         else:
             self.viewer.model_bracelet = self.compute_matrix(None, None, "B", ai=False)
             self.viewer.model_occluder = self.compute_matrix(None, None, "H", ai=False)
@@ -185,14 +240,23 @@ class TryOnWindow(QMainWindow):
         self.viewer.update_bg(frame_disp)
         self.viewer.update()
 
-    def compute_matrix(self, rvec, tvec, prefix, ai=False):
+    def compute_matrix(self, rvec, tvec, prefix, ai=False, is_left=False):
         # Helper to get value from slider * scale
         def val(n): 
-            return self.sliders[f"{prefix}_{n}"]['obj'].value() * self.sliders[f"{prefix}_{n}"]['scale']
-        
+            # Safety check if key exists (since we deleted Pos X/Z)
+            if f"{prefix}_{n}" in self.sliders:
+                return self.sliders[f"{prefix}_{n}"]['obj'].value() * self.sliders[f"{prefix}_{n}"]['scale']
+            return 0.0
         # 1. Base Transformation (From AI or Identity)
         if ai:
+            # Convert the FIXED vector to Matrix
             R, _ = cv2.Rodrigues(rvec)
+            # --- CONDITIONAL FIX ---
+            # ONLY flip if it is actually the Left Hand
+            # if is_left:
+                # Flip X-axis to correct the "Mirror Effect" on rotation
+                # Flip_X = np.diag([-1, 1, 1]).astype(np.float32)
+                # R = R @ Flip_X
             T_base = np.eye(4, dtype=np.float32)
             T_base[:3, :3] = R
             T_base[:3, 3] = tvec.flatten()
@@ -205,6 +269,7 @@ class TryOnWindow(QMainWindow):
         
         # 3. Manual Scaling
         scale_val = val("Scale")
+        if scale_val == 0: scale_val = 1.0 # Prevent invisible object
         S = np.diag([scale_val, scale_val, scale_val, 1.0]).astype(np.float32)
         
         # 4. Manual Rotation
@@ -230,17 +295,17 @@ class TryOnWindow(QMainWindow):
         M_rot = np.eye(4, dtype=np.float32)
         M_rot[:3, :3] = M_rot_3x3
         
-        # 5. Manual Translation (Position)
-        tx, ty, tz = val("Pos X"), val("Pos Y"), val("Pos Z")
-        if not ai: 
-            tz -= 30.0 # Default push-back for manual mode so it's visible
+        # 5. TRANSLATE (The "Bead Slide") - "Outer Layer"
+        # We ONLY translate along Y (The Bone Axis)
+        # We force X and Z to be 0 so it can never leave the line
+        slide_dist = val("Slide") 
         
-        T_off = np.eye(4, dtype=np.float32)
-        T_off[:3, 3] = [tx, ty, tz]
+        T_slide = np.eye(4, dtype=np.float32)
+        T_slide[:3, 3] = [0, slide_dist, 0] # X=0, Z=0, Y=Variable
         
         # 6. Final Multiplication Order
         # Scale -> Rotate -> Translate -> Base(AI) -> FixCoords
-        return cv_to_gl @ T_base @ T_off @ M_rot @ S
+        return cv_to_gl @ T_base @ T_slide @ M_rot @ S
     
     def save_settings(self):
         """Iterates through all sliders and saves their raw integer values to JSON."""
