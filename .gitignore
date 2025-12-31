@@ -1,0 +1,12 @@
+data
+# 3D assets
+*.obj
+*.fbx
+*.glb
+*.ply
+
+# ML / binary
+*.onnx
+*.pt
+*.engine
+*.bin
