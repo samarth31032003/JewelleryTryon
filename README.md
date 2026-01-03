@@ -2,7 +2,8 @@
 git clone <your-repo-url>
 cd JewelleryTryon
 
-# 2. Create a virtual environment (This is your "Docker" replacement)
+# 2. install python & Create a virtual environment (This is your "Docker" replacement)
+Install Python 3.12 for Windows.
 python -m venv venv
 
 # 3. Activate it
