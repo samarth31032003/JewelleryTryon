@@ -9,13 +9,19 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt5.QtCore import Qt, QTimer
 
 from graphics.renderer import ARViewerWidget
-from trackers.wrist_tracker import WristTracker
-
+# from trackers.wrist_tracker import WristTracker
+from trackers.pose_engine import PoseEngine
+from trackers.strategies.wrist import WristStrategy
 class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibility
     def __init__(self, db):
         super().__init__()
         self.db = db  # Store DB reference
-        self.tracker = WristTracker()
+        # 1. Get the Shared Engine
+        self.ai_engine = PoseEngine() 
+        
+        # 2. Strategy is None initially
+        self.tracking_strategy = None
+
         self.current_item = None # Track the active jewelry item
         
         self.use_ai = False
@@ -152,6 +158,14 @@ class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibil
         # D. Trigger Load if visible
         if self.isVisible():
             self._process_pending_loads()
+        
+        # 3. SELECT STRATEGY DYNAMICALLY
+        if item.category == "Bracelet":
+            self.tracking_strategy = WristStrategy()
+            # Also load hand occluder here
+        elif item.category == "Necklace":
+            # self.tracking_strategy = NeckStrategy()
+            pass
 
     def save_current_settings_to_db(self):
         """Gathers all slider values and updates the DB."""
@@ -233,33 +247,49 @@ class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibil
         if not self.cap.isOpened(): return
         ret, frame = self.cap.read()
         if not ret: return
-        frame_disp = cv2.flip(frame, 0)
         
-        if self.use_ai:
-            rvec, tvec, info = self.tracker.process(frame_disp)
-            if self.show_landmarks:
-                frame_disp = self.tracker.draw_debug(frame_disp)
+        # Clear lists for this frame
+        self.viewer.render_instances = []
+        self.viewer.occluder_instances = []
+        # frame_disp = cv2.flip(frame, 0)
+        frame_disp = frame
+        
+        if self.use_ai and self.tracking_strategy:
+            # A. Engine does the heavy lifting ONCE
+            results = self.ai_engine.process(frame)
             
-            if info['found']:
-                # Check if it is a Left Hand
-                is_left = (info['hand'] == "Left")
-                # Use "J" prefix for Jewelry, "H" for Hand
-                # PASS 'is_left' TO THE FUNCTION
-                self.viewer.model_bracelet = self.compute_matrix(
-                    rvec, tvec, "J", ai=True, is_left=is_left
-                )
+            # B. Strategy does the math specific to this item
+            h, w, _ = frame.shape
+            # 2. Get List of Poses (Left, Right, or Both)
+            poses = self.tracking_strategy.calculate_pose(results, w, h)
+            
+            # 3. Process Each Hand
+            if poses:
+                self.txt.setText(f"Tracking: {len(poses)} Hand(s)")
+
+                for (rvec, tvec, info) in poses:
+                    is_left = (info['hand'] == "Left")
+                    # Use "J" prefix for Jewelry, "H" for Hand
+                    # PASS 'is_left' TO THE FUNCTION
+                    mat_jewel = self.compute_matrix(
+                        rvec, tvec, "J", ai=True, is_left=is_left
+                    )
+                    self.viewer.render_instances.append(mat_jewel)
                 
-                # Occluder also needs to know!
-                self.viewer.model_occluder = self.compute_matrix(
-                    rvec, tvec, "H", ai=True, is_left=is_left
-                )
+                    # Occluder also needs to know!
+                    mat_occ = self.compute_matrix(
+                        rvec, tvec, "H", ai=True, is_left=is_left
+                    )
+                    self.viewer.occluder_instances.append(mat_occ)
                 
-                self.txt.setText(f"Hand: {info['hand']} | Depth: {info['z_depth']:.1f}")
-            else: 
+                    self.txt.setText(f"Hand: {info['hand']} | Depth: {info['z_depth']:.1f}")
+            else:
                 self.txt.setText("Searching...")
         else:
-            self.viewer.model_bracelet = self.compute_matrix(None, None, "J", ai=False)
-            self.viewer.model_occluder = self.compute_matrix(None, None, "H", ai=False)
+            mat_jewel = self.compute_matrix(None, None, "J", ai=False)
+            mat_occ = self.compute_matrix(None, None, "H", ai=False)
+            self.viewer.render_instances.append(mat_jewel)
+            self.viewer.occluder_instances.append(mat_occ)
             self.txt.setText("Manual Mode")
         
         self.viewer.update_bg(frame_disp)

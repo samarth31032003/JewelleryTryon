@@ -1,10 +1,11 @@
 data
+.vscode
+__pycache__
 # 3D assets
 *.obj
 *.fbx
 *.glb
 *.ply
-
 # ML / binary
 *.onnx
 *.pt

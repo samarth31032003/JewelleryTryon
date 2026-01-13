@@ -32,8 +32,11 @@ class ARViewerWidget(QOpenGLWidget):
         # Matrices
         self.proj = np.eye(4, dtype=np.float32)
         self.view = np.eye(4, dtype=np.float32)
-        self.model_bracelet = np.eye(4, dtype=np.float32)
-        self.model_occluder = np.eye(4, dtype=np.float32)
+        # REPLACE 'self.model_bracelet' with this:
+        self.render_instances = [] # List of dicts: {'matrix': mat4, 'type': 'mesh'/'occluder'}
+        
+        # Keep Occluder instances separate or unified? Let's unify for simplicity in loop
+        self.occluder_instances = [] 
         
         # Scene Settings
         self.fov = 40.0
@@ -236,29 +239,39 @@ class ARViewerWidget(QOpenGLWidget):
         glUniform1f(self.loc_l_diff, self.diffuse_str)
         
         # Occluder
-        if self.occluder_ready:
-            glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, self.model_occluder)
-            glUniform1i(self.loc_m_has_tex, 0) 
+        if self.occluder_ready and self.occluder_instances:
+            glUniform1i(self.loc_m_has_tex, 0)
+            glBindVertexArray(self.vao_occluder)
+            
+            # 1. SETUP COLOR/MASKING
             if self.debug_occluder:
                 glUniform4f(self.loc_m_color, 1.0, 0.0, 0.0, 0.5) 
-                glBindVertexArray(self.vao_occluder)
-                glDrawElements(GL_TRIANGLES, self.index_count_occluder, GL_UNSIGNED_INT, None)
             else:
                 glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE) 
-                glDepthMask(GL_TRUE)                                
-                glBindVertexArray(self.vao_occluder)
+                glDepthMask(GL_TRUE) 
+
+            # 2. LOOP & DRAW
+            for instance_mat in self.occluder_instances:
+                glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, instance_mat)
                 glDrawElements(GL_TRIANGLES, self.index_count_occluder, GL_UNSIGNED_INT, None)
-                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)     
+
+            # Restore Color Mask
+            if not self.debug_occluder:
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
         
-        # Bracelet
-        if self.mesh_ready:
-            glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, self.model_bracelet)
+        # DRAW JEWELRY MESHES
+        if self.mesh_ready and self.render_instances:
             glUniform4f(self.loc_m_color, 1.0, 0.84, 0.0, 1.0) 
             if self.mesh_tex_id:
                 glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, self.mesh_tex_id)
                 glUniform1i(self.loc_m_tex, 0); glUniform1i(self.loc_m_has_tex, 1)
             else: glUniform1i(self.loc_m_has_tex, 0)
-            glBindVertexArray(self.vao_mesh); glDrawElements(GL_TRIANGLES, self.index_count, GL_UNSIGNED_INT, None)
+            glBindVertexArray(self.vao_mesh)
+                            
+            # LOOP & DRAW
+            for instance_mat in self.render_instances:
+                glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, instance_mat)
+                glDrawElements(GL_TRIANGLES, self.index_count, GL_UNSIGNED_INT, None)
 
     def load_object(self, path, is_occluder=False):
         """Uses the Utility loader to get data, then uploads to GPU."""
