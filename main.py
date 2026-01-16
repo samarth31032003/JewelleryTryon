@@ -69,7 +69,7 @@ class MainApp(QMainWindow):
     def go_to_catalogue(self):
         # 1. SAVE: Explicitly save settings before leaving TryOn
         print("Navigating back: Saving settings...")
-        self.tryon_screen.save_current_settings_to_db()
+        self.tryon_screen.save_settings()
         
         # 2. STOP: Stop camera resources
         if hasattr(self.tryon_screen, 'timer'):

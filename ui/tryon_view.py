@@ -1,127 +1,68 @@
 # ui/tryon_view.py
 import cv2
-import json
-import numpy as np
 import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QSlider, QGroupBox, QGridLayout, 
-                             QCheckBox, QTextEdit, QTabWidget)
+                             QCheckBox, QTextEdit, QScrollArea, QTabWidget)
 from PyQt5.QtCore import Qt, QTimer
 
 from graphics.renderer import ARViewerWidget
-# from trackers.wrist_tracker import WristTracker
 from trackers.pose_engine import PoseEngine
 from trackers.strategies.wrist import WristStrategy
-class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibility
+# Import other strategies here later
+
+class TryOnWindow(QWidget): 
     def __init__(self, db):
         super().__init__()
-        self.db = db  # Store DB reference
-        # 1. Get the Shared Engine
-        self.ai_engine = PoseEngine() 
-        
-        # 2. Strategy is None initially
-        self.tracking_strategy = None
+        self.db = db
+        self.ai_engine = PoseEngine()
+        self.strategy = None
+        self.current_item = None
+        self.sliders = {} # Keep track of active sliders
+        # --- LOADING STATE ---
+        self.pending_item = None
 
-        self.current_item = None # Track the active jewelry item
-        
-        self.use_ai = False
-        self.show_landmarks = False 
-        self.sliders = {} 
-        
-        # --- NEW: State Management for Loading ---
-        self.occluder_loaded = False
-        self.pending_item = None # Changed from path to Item Object
-        
         self.setup_ui()
         
         self.cap = cv2.VideoCapture() 
         self.timer = QTimer()
         self.timer.timeout.connect(self.loop)
-        
 
     def setup_ui(self):
         layout = QHBoxLayout(self)
         
-        # Left: OpenGL View
+        # 1. Left: Viewer
         self.viewer = ARViewerWidget()
         layout.addWidget(self.viewer, stretch=3)
         
-        # Right: Controls
-        panel = QWidget(); p_layout = QVBoxLayout(panel); layout.addWidget(panel, stretch=1)
+        # 2. Right: Controls Panel
+        self.panel = QWidget()
+        self.p_layout = QVBoxLayout(self.panel)
+        layout.addWidget(self.panel, stretch=1)
         tabs = QTabWidget()
         
-        # --- TAB 1: JEWELRY TRANSFORM ---
-        tab_trans = QWidget(); t_lay = QVBoxLayout(tab_trans)
-        # Removed "Load Bracelet" button since Catalogue handles this now
-        
+        # Fixed Controls (Always there)
         self.btn_ai = QPushButton("Enable AI"); self.btn_ai.setCheckable(True)
         self.btn_ai.setStyleSheet("background-color: #555555; color: white; padding: 10px;")
-        self.btn_ai.toggled.connect(self.toggle_ai); t_lay.addWidget(self.btn_ai)
-        
-        self.chk_track = QCheckBox("Show Tracking Points")
-        self.chk_track.toggled.connect(self.toggle_tracking_viz); t_lay.addWidget(self.chk_track)
+        self.btn_ai.toggled.connect(self.toggle_ai)
+        self.p_layout.addWidget(self.btn_ai)
 
-        # SAVE BUTTON (Manual Trigger)
-        btn_save = QPushButton("Save Settings for this Item")
-        btn_save.setStyleSheet("background-color: #0078D7; color: white; font-weight: bold;")
-        btn_save.clicked.connect(self.save_current_settings_to_db)
-        t_lay.addWidget(btn_save)
+        self.btn_save = QPushButton("Save Settings")
+        self.btn_save.setStyleSheet("background-color: #0078D7; color: white; font-weight: bold;")
+        self.btn_save.clicked.connect(self.save_settings)
+        self.p_layout.addWidget(self.btn_save)
 
-        chk_grid = QCheckBox("Show Grid"); 
-        chk_grid.toggled.connect(lambda c: setattr(self.viewer, 'show_grid', c)); t_lay.addWidget(chk_grid)
-        
-        self.txt = QTextEdit(); self.txt.setMaximumHeight(80); t_lay.addWidget(self.txt)
-        
-        grid = QGridLayout()
-        # Generic Jewelry Params (Applies to Necklace, Bracelet, Ring, etc.)
-        # We use prefix "J_" (Jewelry) instead of "B_" to be generic
-        # [Name, Min, Max, Default, Scale]
-        params_jewelry = [
-            ("Scale", 1, 500, 100, 0.01),
-            ("Slide", -500, 500, 0, 0.5),
-            ("Rot X", -180, 180, 0, 1.0),
-            ("Rot Y", -180, 180, 0, 1.0),
-            ("Rot Z", -180, 180, 0, 1.0)
-        ]
-        
-        btn_reset = QPushButton("Reset Transform")
-        btn_reset.setStyleSheet("background-color: #AA4444; color: white; font-weight: bold;")
-        btn_reset.clicked.connect(lambda: self.reset_transform("J"))
-        t_lay.addWidget(btn_reset)
-        
-        self.add_sliders("J", params_jewelry, grid) 
-        grp = QGroupBox("Jewelry Adjustment"); grp.setLayout(grid); t_lay.addWidget(grp)
-        t_lay.addStretch(); tabs.addTab(tab_trans, "Jewelry")
-        
-        # --- TAB 2: OCCLUDER ---
-        tab_occ = QWidget(); o_lay = QVBoxLayout(tab_occ)
-        # Removed Reload button (handled automatically)
-        
-        chk_vis = QCheckBox("Debug: Show Hand Mesh (Red)"); chk_vis.setChecked(False) #false default
-        chk_vis.toggled.connect(lambda c: setattr(self.viewer, 'debug_occluder', c)); o_lay.addWidget(chk_vis)
-        
-        occ_grid = QGridLayout()
-        params_occ = [
-            ("Scale", 1, 1000, 100, 0.01),
-            ("Slide", -500, 500, 0, 0.5),
-            ("Rot X", -180, 180, 0, 1.0),
-            ("Rot Y", -180, 180, 0, 1.0),
-            ("Rot Z", -180, 180, 0, 1.0)
-        ]
+        self.txt = QTextEdit(); self.txt.setMaximumHeight(60)
+        self.p_layout.addWidget(self.txt)
 
-        # FIX: Using the exact same 'params_occ' structure as Bracelet
-        # This replaces the old Pos X/Y/Z with Slide/Rot logic
-        btn_reset_occ = QPushButton("Reset Hand Transform")
-        btn_reset_occ.setStyleSheet("background-color: #AA4444; color: white; font-weight: bold;")
-        btn_reset_occ.clicked.connect(lambda: self.reset_transform("H"))
-        o_lay.addWidget(btn_reset_occ)
-        
-        self.add_sliders("H", params_occ, occ_grid) 
-        grp_occ = QGroupBox("Occluder Adjustment"); grp_occ.setLayout(occ_grid); o_lay.addWidget(grp_occ)
-        o_lay.addStretch(); tabs.addTab(tab_occ, "Occluder")
+        # Dynamic Area (This will be cleared/rebuilt)
+        self.dynamic_area = QScrollArea()
+        self.dynamic_area.setWidgetResizable(True)
+        self.dynamic_container = QWidget()
+        self.dynamic_layout = QVBoxLayout(self.dynamic_container)
+        self.dynamic_area.setWidget(self.dynamic_container)
+        self.p_layout.addWidget(self.dynamic_area)
 
-        p_layout.addWidget(tabs)
-        
         # --- TAB 3: CAMERA ---
         tab_cam = QWidget(); c_lay = QVBoxLayout(tab_cam)
         cam_grid = QGridLayout()
@@ -131,84 +72,54 @@ class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibil
         c_lay.addWidget(grp_cam)
         c_lay.addStretch()
         tabs.addTab(tab_cam, "Camera")
+        self.p_layout.addWidget(tabs)
 
-    # --- CRITICAL FIX: The Safe Loading Logic ---
     def set_active_item(self, item):
-        """
-        1. Saves settings for the OLD item.
-        2. Loads settings for the NEW item.
-        3. Queues the 3D model for loading.
-        """
-        # A. Save previous item state
-        if self.current_item is not None:
-            self.save_current_settings_to_db()
-        
-        # B. Switch to new Item
+        # 1. Save old
+        if self.current_item and self.strategy:
+            self.save_settings()
+
         self.current_item = item
+        
+        # 2. Select Strategy
+        if item.category == "Bracelet":
+            self.strategy = WristStrategy()
+        
+        # elif item.category == "Necklace": self.strategy = NeckStrategy()
+        
+        # 3. Queue the Item for loading
         self.pending_item = item
         
-        # C. Load Settings from DB (or use defaults)
+        # 4. Load Saved Settings into Strategy
         if item.settings:
-            print(f"Restoring settings for {item.name}")
-            self.apply_slider_values(item.settings)
-        else:
-            print(f"No saved settings for {item.name}, using defaults.")
-            self.reset_transform("J") # Reset Jewelry sliders
-        
-        # D. Trigger Load if visible
+            self.strategy.update_settings(item.settings)
+
+        # 5. Rebuild UI for this Strategy
+        self.rebuild_controls()
+
+        # 5. Trigger Load if visible
         if self.isVisible():
             self._process_pending_loads()
-        
-        # 3. SELECT STRATEGY DYNAMICALLY
-        if item.category == "Bracelet":
-            self.tracking_strategy = WristStrategy()
-            # Also load hand occluder here
-        elif item.category == "Necklace":
-            # self.tracking_strategy = NeckStrategy()
-            pass
 
-    def save_current_settings_to_db(self):
-        """Gathers all slider values and updates the DB."""
-        if not self.current_item: return
-        
-        settings = {}
-        for key, info in self.sliders.items():
-            # Save raw integer value from slider
-            settings[key] = info['obj'].value()
-            
-        self.db.update_item_settings(self.current_item.id, settings)
-        print(f"Saved configuration for {self.current_item.name}")
-
-    def apply_slider_values(self, settings):
-        """Restores slider positions from a dictionary."""
-        self.viewer.blockSignals(True) # Prevent lag while setting multiple
-        for key, value in settings.items():
-            if key in self.sliders:
-                self.sliders[key]['obj'].setValue(value)
-        self.viewer.blockSignals(False)
-        self.viewer.update()
-
-    # NEW: Only load OpenGL content when the window is actually shown!
     def showEvent(self, event):
-        """Called automatically when the widget becomes visible."""
+        """Called automatically when window opens."""
         super().showEvent(event)
-        # Now that we are visible, the OpenGL Context is real. Load everything.
+        # Wait 50ms for OpenGL context to be ready
         QTimer.singleShot(50, self._process_pending_loads)
 
     def _process_pending_loads(self):
-        # 1. Load the Jewelry Item
+        """Actually loads the mesh into OpenGL."""
         if self.pending_item:
-            print(f"Loading 3D Model: {self.pending_item.model_path}")
+            print(f"Loading Model: {self.pending_item.model_path}")
             self.viewer.load_object(self.pending_item.model_path, is_occluder=False)
-            self.pending_item = None # Clear the queue
+            self.pending_item = None
 
-        # 2. Load the Hand Occluder (Once)
-        if not self.occluder_loaded:
-            hand_path = os.path.abspath("data/3d_models/3d_hand.obj") 
-            if os.path.exists(hand_path):
-                print("Loading Occluder...")
-                self.viewer.load_object(hand_path, is_occluder=True)
-                self.occluder_loaded = True
+    def save_settings(self):
+        """Gathers all slider values and updates the DB."""
+        if self.current_item and self.strategy:
+            # Strategy.settings already has the latest values
+            self.db.update_item_settings(self.current_item.id, self.strategy.settings)
+            print("Settings Saved!")
 
     def add_sliders(self, prefix, params, layout, callback=None):
         for i, (n, min_v, max_v, def_v, scale) in enumerate(params):
@@ -225,136 +136,91 @@ class TryOnWindow(QWidget): # Inherit from QWidget for QStackedWidget compatibil
         self.viewer.update() # Trigger repaint 
 
 
-    def toggle_ai(self, c):
-        self.use_ai = c
-        self.btn_ai.setText("AI TRACKING: ON" if c else "Enable AI")
-        self.btn_ai.setStyleSheet(f"background-color: {'#00AA00' if c else '#555555'}; color: white; padding: 10px;")
+    def toggle_ai(self, checked):
+        self.use_ai = checked
+        self.btn_ai.setText("AI TRACKING: ON" if checked else "Enable AI")
 
-    def toggle_tracking_viz(self, c):
-        self.show_landmarks = c
+    def rebuild_controls(self):
+        """Asks the Strategy what sliders it needs and draws them."""
+        # Clear old controls
+        for i in reversed(range(self.dynamic_layout.count())): 
+            self.dynamic_layout.itemAt(i).widget().setParent(None)
+        self.sliders = {}
 
-    def reset_transform(self, prefix):
-        """Unified reset function for both Bracelet (B) and Hand (H)"""
-        print(f"Resetting {prefix} Transform...")
-        self.viewer.blockSignals(True)
-        for key, info in self.sliders.items():
-            if key.startswith(f"{prefix}_"):
-                info['obj'].setValue(info['default'])
-        self.viewer.blockSignals(False)
-        self.viewer.update()
+        if not self.strategy: return
+
+        # Get definitions: [(Key, Label, Min, Max, Default, Scale), ...]
+        defs = self.strategy.get_slider_definitions()
+        
+        grid = QGridLayout()
+        row = 0
+        for key, label, min_v, max_v, def_v, _ in defs:
+            # Check if we have a saved value for this key
+            current_val = self.strategy.settings.get(key, def_v)
+            
+            lbl = QLabel(label)
+            sld = QSlider(Qt.Horizontal)
+            sld.setRange(min_v, max_v)
+            sld.setValue(int(current_val))
+            
+            # Connect Signal
+            # We use a closure (lambda) to capture the specific 'key'
+            sld.valueChanged.connect(lambda val, k=key: self.on_slider_change(k, val))
+            
+            self.sliders[key] = sld
+            grid.addWidget(lbl, row, 0)
+            grid.addWidget(sld, row, 1)
+            row += 1
+
+        grp = QGroupBox("Adjustments")
+        grp.setLayout(grid)
+        self.dynamic_layout.addWidget(grp)
+        self.dynamic_layout.addStretch()
+
+    def on_slider_change(self, key, value):
+        # Update the Strategy's memory immediately
+        if self.strategy:
+            self.strategy.update_settings({key: value})
+
 
     def loop(self):
         if not self.cap.isOpened(): return
         ret, frame = self.cap.read()
         if not ret: return
         
-        # Clear lists for this frame
+        # Reset Render Lists
         self.viewer.render_instances = []
         self.viewer.occluder_instances = []
-        # frame_disp = cv2.flip(frame, 0)
-        frame_disp = frame
         
-        if self.use_ai and self.tracking_strategy:
-            # A. Engine does the heavy lifting ONCE
+        if self.use_ai and self.strategy:
+            # 1. AI Engine
             results = self.ai_engine.process(frame)
-            
-            # B. Strategy does the math specific to this item
             h, w, _ = frame.shape
-            # 2. Get List of Poses (Left, Right, or Both)
-            poses = self.tracking_strategy.calculate_pose(results, w, h)
             
-            # 3. Process Each Hand
-            if poses:
-                self.txt.setText(f"Tracking: {len(poses)} Hand(s)")
-
-                for (rvec, tvec, info) in poses:
-                    is_left = (info['hand'] == "Left")
-                    # Use "J" prefix for Jewelry, "H" for Hand
-                    # PASS 'is_left' TO THE FUNCTION
-                    mat_jewel = self.compute_matrix(
-                        rvec, tvec, "J", ai=True, is_left=is_left
-                    )
-                    self.viewer.render_instances.append(mat_jewel)
-                
-                    # Occluder also needs to know!
-                    mat_occ = self.compute_matrix(
-                        rvec, tvec, "H", ai=True, is_left=is_left
-                    )
-                    self.viewer.occluder_instances.append(mat_occ)
-                
-                    self.txt.setText(f"Hand: {info['hand']} | Depth: {info['z_depth']:.1f}")
-            else:
-                self.txt.setText("Searching...")
+            # 2. Strategy Calculation (Returns Render Commands)
+            commands = self.strategy.process_frame(results, w, h)
+            
+            count = 0
+            for cmd in commands:
+                if cmd['type'] == 'mesh':
+                    self.viewer.render_instances.append(cmd['matrix'])
+                    count += 1
+                elif cmd['type'] == 'occluder':
+                    self.viewer.occluder_instances.append(cmd['matrix'])
+            
+            self.txt.setText(f"Active Objects: {count}")
+            
         else:
-            mat_jewel = self.compute_matrix(None, None, "J", ai=False)
-            mat_occ = self.compute_matrix(None, None, "H", ai=False)
-            self.viewer.render_instances.append(mat_jewel)
-            self.viewer.occluder_instances.append(mat_occ)
-            self.txt.setText("Manual Mode")
-        
-        self.viewer.update_bg(frame_disp)
+            self.txt.setText("Manual / No AI")
+            # You could add a 'manual fallback' matrix here if you want
+
+        self.viewer.update_bg(frame)
         self.viewer.update()
-
-    def compute_matrix(self, rvec, tvec, prefix, ai=False, is_left=False):
-        def val(n): 
-            key = f"{prefix}_{n}"
-            if key in self.sliders:
-                return self.sliders[key]['obj'].value() * self.sliders[key]['scale']
-            return 0.0
-            
-        # Base Transformation
-        if ai:
-            R, _ = cv2.Rodrigues(rvec)
-            T_base = np.eye(4, dtype=np.float32)
-            T_base[:3, :3] = R
-            T_base[:3, 3] = tvec.flatten()
-        else: 
-            T_base = np.eye(4, dtype=np.float32)
-            
-        # 2. Coordinate Conversion (OpenCV -> OpenGL)
-        # OpenCV looks down +Z, OpenGL looks down -Z. We flip Y and Z.
-        cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
-
-        # Scale
-        scale_val = val("Scale"); 
-        if scale_val == 0: scale_val = 1.0
-        S = np.diag([scale_val, scale_val, scale_val, 1.0]).astype(np.float32)
         
-        # 4. Manual Rotation
-        rx, ry, rz = np.radians(val("Rot X")), np.radians(val("Rot Y")), np.radians(val("Rot Z"))
-        
-        # Rotation X
-        c, s = np.cos(rx), np.sin(rx)
-        Rx = np.array([[1, 0, 0], [0, c, -s], [0, s, c]], dtype=np.float32)
-        
-        # Rotation Y
-        c, s = np.cos(ry), np.sin(ry)
-        Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=np.float32)
-        
-        # Rotation Z
-        c, s = np.cos(rz), np.sin(rz)
-        Rz = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
-        
-        # Unified Rotation Order
-        M_rot = np.eye(4, dtype=np.float32)
-        M_rot[:3, :3] = Rx @ Ry @ Rz 
-        
-        # 5. TRANSLATE (The "Bead Slide") - "Outer Layer"
-        # We ONLY translate along Y (The Bone Axis)
-        # We force X and Z to be 0 so it can never leave the line
-        slide_dist = val("Slide") 
-        T_slide = np.eye(4, dtype=np.float32)
-        T_slide[:3, 3] = [0, slide_dist, 0] 
-        
-        # 6. Final Multiplication Order
-        # Scale -> Rotate -> Translate -> Base(AI) -> FixCoords
-        return cv_to_gl @ T_base @ T_slide @ M_rot @ S
-    
     def closeEvent(self, event):
         """Called when the window is being closed."""
-        # 1. Save the state
-        self.save_current_settings_to_db() # Save one last time
-        
+        self.save_settings()
+
         # 2. Release the camera resource
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()

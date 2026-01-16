@@ -83,6 +83,7 @@ class ARViewerWidget(QOpenGLWidget):
         
         self._init_bg_quad()
         self._init_debug_layer() 
+        self.init_occluder_primitive()
 
     def _init_bg_quad(self):
         data = np.array([-1,-1,0,1, 1,-1,1,1, -1,1,0,0, 1,1,1,0], dtype=np.float32)
@@ -147,6 +148,54 @@ class ARViewerWidget(QOpenGLWidget):
         glBufferData(GL_ARRAY_BUFFER, g_data.nbytes, g_data, GL_STATIC_DRAW)
         glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(0))
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(12))
+
+    def _create_cylinder_mesh(self):
+        """Generates a simple unit cylinder (height=1, radius=1) along Y axis."""
+        # Simple 12-sided cylinder
+        segments = 12
+        verts = []
+        faces = []
+        
+        # Top and Bottom circles
+        for y in [0.0, 1.0]: # Bottom at 0, Top at 1
+            for i in range(segments):
+                theta = 2.0 * np.pi * i / segments
+                x = np.cos(theta)
+                z = np.sin(theta)
+                verts.extend([x, y, z]) # Pos
+                verts.extend([x, 0, z]) # Normal (Approx)
+                verts.extend([i/segments, y]) # UV
+
+        # Generate Faces (Triangles)
+        for i in range(segments):
+            next_i = (i + 1) % segments
+            # Bottom vertices are 0..11, Top are 12..23
+            b1, b2 = i, next_i
+            t1, t2 = i + segments, next_i + segments
+            
+            # Quad formed by b1, b2, t2, t1
+            faces.extend([b1, t1, b2])
+            faces.extend([b2, t1, t2])
+
+        return np.array(verts, dtype=np.float32), np.array(faces, dtype=np.uint32)
+
+    def init_occluder_primitive(self):
+        """Creates the VBO for the generic cylinder occluder."""
+        self.makeCurrent()
+        v_data, i_data = self._create_cylinder_mesh()
+        
+        self.vao_cylinder = glGenVertexArrays(1); glBindVertexArray(self.vao_cylinder)
+        vbo = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo)
+        glBufferData(GL_ARRAY_BUFFER, v_data.nbytes, v_data, GL_STATIC_DRAW)
+        ebo = glGenBuffers(1); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_data.nbytes, i_data, GL_STATIC_DRAW)
+        
+        stride = 32
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
+        # We don't really need normals/UVs for invisible occluders, but keeping format consistent
+        
+        self.idx_count_cylinder = len(i_data)
+        self.cylinder_ready = True
 
     def resizeGL(self, w, h):
         """Calculates a centered viewport that maintains aspect ratio."""
@@ -239,9 +288,10 @@ class ARViewerWidget(QOpenGLWidget):
         glUniform1f(self.loc_l_diff, self.diffuse_str)
         
         # Occluder
-        if self.occluder_ready and self.occluder_instances:
+        # We now check for 'cylinder_ready' and use 'vao_cylinder'
+        if self.cylinder_ready and self.occluder_instances:
             glUniform1i(self.loc_m_has_tex, 0)
-            glBindVertexArray(self.vao_occluder)
+            glBindVertexArray(self.vao_cylinder) # <--- USE CYLINDER VAO
             
             # 1. SETUP COLOR/MASKING
             if self.debug_occluder:
@@ -253,7 +303,7 @@ class ARViewerWidget(QOpenGLWidget):
             # 2. LOOP & DRAW
             for instance_mat in self.occluder_instances:
                 glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, instance_mat)
-                glDrawElements(GL_TRIANGLES, self.index_count_occluder, GL_UNSIGNED_INT, None)
+                glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
 
             # Restore Color Mask
             if not self.debug_occluder:
@@ -261,6 +311,7 @@ class ARViewerWidget(QOpenGLWidget):
         
         # DRAW JEWELRY MESHES
         if self.mesh_ready and self.render_instances:
+
             glUniform4f(self.loc_m_color, 1.0, 0.84, 0.0, 1.0) 
             if self.mesh_tex_id:
                 glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, self.mesh_tex_id)
