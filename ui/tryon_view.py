@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt, QTimer
 from graphics.renderer import ARViewerWidget
 from trackers.pose_engine import PoseEngine
 from trackers.strategies.wrist import WristStrategy
-# Import other strategies here later
+from trackers.strategies.ring import RingStrategy
 
 class TryOnWindow(QWidget): 
     def __init__(self, db):
@@ -84,7 +84,8 @@ class TryOnWindow(QWidget):
         # 2. Select Strategy
         if item.category == "Bracelet":
             self.strategy = WristStrategy()
-        
+        elif item.category == "Ring":  # <--- ADD THIS
+            self.strategy = RingStrategy()
         # elif item.category == "Necklace": self.strategy = NeckStrategy()
         
         # 3. Queue the Item for loading
