@@ -9,8 +9,15 @@ from PyQt5.QtGui import QPixmap
 from ui.styles import get_stylesheet, COLOR_PRIMARY
 
 # Fixed categories to ensure tracking compatibility
-SUPPORTED_CATEGORIES = ["Bracelet", "Necklace", "Ring", "Earring"]
-
+SUPPORTED_CATEGORIES = [
+    "Bracelet", 
+    "Necklace", 
+    "Ring", 
+    "Earring", 
+    "Waist Band", 
+    "Nose Pin", 
+    "Forehead Pendant"
+]
 class AddItemDialog(QDialog):
     """Popup to add new jewelry. Forces category selection."""
     def __init__(self, parent=None):

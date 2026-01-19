@@ -10,7 +10,11 @@ from graphics.renderer import ARViewerWidget
 from trackers.pose_engine import PoseEngine
 from trackers.strategies.wrist import WristStrategy
 from trackers.strategies.ring import RingStrategy
-
+from trackers.strategies.waist import WaistStrategy
+from trackers.strategies.neck import NeckStrategy
+from trackers.strategies.nose import NoseStrategy
+from trackers.strategies.ear import EarringStrategy
+from trackers.strategies.forehead import ForeheadStrategy
 class TryOnWindow(QWidget): 
     def __init__(self, db):
         super().__init__()
@@ -142,7 +146,16 @@ class TryOnWindow(QWidget):
             self.strategy = WristStrategy()
         elif item.category == "Ring":
             self.strategy = RingStrategy()
-        # elif item.category == "Necklace": self.strategy = NeckStrategy()
+        elif item.category == "Waist Band":
+            self.strategy = WaistStrategy()
+        elif item.category == "Necklace":
+            self.strategy = NeckStrategy()
+        elif item.category == "Nose Pin":
+            self.strategy = NoseStrategy()
+        elif item.category == "Earring":
+            self.strategy = EarringStrategy()
+        elif item.category == "Forehead Pendant": 
+            self.strategy = ForeheadStrategy()
         
         # 3. Queue the Item for loading
         self.pending_item = item
