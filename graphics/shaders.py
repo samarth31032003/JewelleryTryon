@@ -29,6 +29,10 @@ uniform float u_ambient_str;
 uniform float u_diffuse_str;
 uniform vec4 u_color_override; 
 
+// Lighting Uniforms
+uniform float u_exposure;
+uniform float u_gamma;
+
 void main() {
     vec3 light_dir = normalize(u_light_pos);
     vec3 norm = normalize(v_normal);
@@ -37,7 +41,16 @@ void main() {
     if (u_has_tex) { base_color = texture(u_tex, v_uv); }
     vec3 ambient = base_color.rgb * u_ambient_str;
     vec3 diffuse = base_color.rgb * diff;
-    fragColor = vec4(ambient + diffuse, base_color.a);
+    vec3 result = ambient + diffuse;
+    
+    // --- POST PROCESSING ---
+    // 1. Exposure Tone Mapping
+    result = vec3(1.0) - exp(-result * u_exposure);
+    
+    // 2. Gamma Correction
+    result = pow(result, vec3(1.0 / u_gamma));
+    
+    fragColor = vec4(result, base_color.a);
 }
 """
 

@@ -34,7 +34,13 @@ class WristStrategy(TrackingStrategy):
         # Initialize Default Settings
         # These match the sliders defined below
         self.settings = {
-            "Scale": 100, "Slide": 0, "Rot_X": 0, "Rot_Y": 0, "Rot_Z": 0
+            "Scale": 100,
+            "Slide": 0,
+            "Rot_X": 0,
+            "Rot_Y": 0,
+            "Rot_Z": 0,
+            "Occ_Radius": 100, # 100% of calculated thickness
+            "Occ_Len": 100     # 100% of bone length
         }
 
     def get_slider_definitions(self):
@@ -44,7 +50,10 @@ class WristStrategy(TrackingStrategy):
             ("Slide", "Position", -500, 500, 0, 0.5),
             ("Rot_X", "Tilt X", -180, 180, 0, 1.0),
             ("Rot_Y", "Tilt Y", -180, 180, 0, 1.0),
-            ("Rot_Z", "Spin", -180, 180, 0, 1.0)
+            ("Rot_Z", "Spin", -180, 180, 0, 1.0),
+            # OCCLUDER CONTROLS (Merged!)
+            ("Occ_Radius", "Mask Thick", 50, 200, 100, 0.01),
+            ("Occ_Len", "Mask Length", 50, 150, 100, 0.01)
         ]
     
     def _get_capsule_matrix(self, point_a, point_b, radius_scale=1.0):
@@ -166,10 +175,16 @@ class WristStrategy(TrackingStrategy):
                     p_elbow = (R_mat @ self.model_right[4]) + t_vec
                     
                     # 2. Calculate Capsule Matrix
+                    rad_scale = self.settings.get("Occ_Radius", 100) / 100.0
+
                     # We extend it slightly past the elbow to be safe
                     p_elbow_ext = p_wrist + (p_elbow - p_wrist) * 1.1 
+                    len_scale = self.settings.get("Occ_Len", 100) / 100.0
                     
-                    mat_occ = self._get_capsule_matrix(p_wrist, p_elbow_ext, radius_scale=1.0)
+                    # Apply Length Scale to the endpoint
+                    p_pip_extended = p_wrist + (p_elbow_ext - p_wrist) * len_scale
+
+                    mat_occ = self._get_capsule_matrix(p_wrist, p_pip_extended, radius_scale=1.0 * rad_scale)
                     
                     # 3. Add to commands
                     render_commands.append({

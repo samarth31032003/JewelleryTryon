@@ -106,7 +106,7 @@ class MainApp(QMainWindow):
         print("App closing: Saving state...")
         # Force save on the tryon screen if it's active or initialized
         if hasattr(self, 'tryon_screen'):
-            self.tryon_screen.save_current_settings_to_db()
+            self.tryon_screen.save_settings() #  'TryOnWindow' object has no attribute 'save_current_settings_to_db'
             # Release camera
             if self.tryon_screen.cap.isOpened():
                 self.tryon_screen.cap.release()

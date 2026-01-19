@@ -40,39 +40,95 @@ class TryOnWindow(QWidget):
         self.p_layout = QVBoxLayout(self.panel)
         layout.addWidget(self.panel, stretch=1)
         tabs = QTabWidget()
+        self.p_layout.addWidget(tabs)
+
+        # --- TAB 1: ITEM SETTINGS (Dynamic) ---
+        self.tab_item = QWidget()
+        self.item_layout = QVBoxLayout(self.tab_item)
         
-        # Fixed Controls (Always there)
-        self.btn_ai = QPushButton("Enable AI"); self.btn_ai.setCheckable(True)
-        self.btn_ai.setStyleSheet("background-color: #555555; color: white; padding: 10px;")
-        self.btn_ai.toggled.connect(self.toggle_ai)
-        self.p_layout.addWidget(self.btn_ai)
-
-        self.btn_save = QPushButton("Save Settings")
-        self.btn_save.setStyleSheet("background-color: #0078D7; color: white; font-weight: bold;")
-        self.btn_save.clicked.connect(self.save_settings)
-        self.p_layout.addWidget(self.btn_save)
-
-        self.txt = QTextEdit(); self.txt.setMaximumHeight(60)
-        self.p_layout.addWidget(self.txt)
-
-        # Dynamic Area (This will be cleared/rebuilt)
-        self.dynamic_area = QScrollArea()
-        self.dynamic_area.setWidgetResizable(True)
+        # 1. Dynamic Slider Area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
         self.dynamic_container = QWidget()
         self.dynamic_layout = QVBoxLayout(self.dynamic_container)
-        self.dynamic_area.setWidget(self.dynamic_container)
-        self.p_layout.addWidget(self.dynamic_area)
+        scroll.setWidget(self.dynamic_container)
+        self.item_layout.addWidget(scroll)
 
-        # --- TAB 3: CAMERA ---
-        tab_cam = QWidget(); c_lay = QVBoxLayout(tab_cam)
+        # 2. Controls Group (AI, Debug, Save)
+        ctrl_layout = QVBoxLayout()
+        
+        # A. AI Toggle
+        self.btn_ai = QPushButton("Enable AI")
+        self.btn_ai.setCheckable(True)
+        self.btn_ai.setStyleSheet("background-color: #555; color: white; padding: 8px;")
+        self.btn_ai.toggled.connect(self.toggle_ai)
+        ctrl_layout.addWidget(self.btn_ai)
+
+        # B. Mask Visibility Checkbox (NEW)
+        self.chk_mask = QCheckBox("Show Occlusion Mask (Debug)")
+        self.chk_mask.setChecked(True) # Default to Visible for tuning
+        self.chk_mask.setStyleSheet("color: #DDD; font-weight: bold; margin: 5px;")
+        self.chk_mask.toggled.connect(self.toggle_mask)
+        ctrl_layout.addWidget(self.chk_mask)
+        
+        # C. Save Button
+        self.btn_save = QPushButton("Save Settings")
+        self.btn_save.setStyleSheet("background-color: #0078D7; color: white; font-weight: bold; padding: 8px;")
+        self.btn_save.clicked.connect(self.save_settings)
+        ctrl_layout.addWidget(self.btn_save)
+
+        self.item_layout.addLayout(ctrl_layout)
+        
+        # Debug Text
+        self.txt = QTextEdit(); self.txt.setMaximumHeight(50)
+        self.item_layout.addWidget(self.txt)
+        
+        tabs.addTab(self.tab_item, "Item Adjustments")
+        
+        # --- TAB 2: SCENE (Global) ---
+        self.tab_scene = QWidget()
+        scene_layout = QVBoxLayout(self.tab_scene)
+        
+        # Camera
         cam_grid = QGridLayout()
-        cam_params = [("FOV", 20, 120, 45, 1.0)]
-        self.add_sliders("Cam", cam_params, cam_grid, self.update_camera_params)
-        grp_cam = QGroupBox("Lens"); grp_cam.setLayout(cam_grid)
-        c_lay.addWidget(grp_cam)
-        c_lay.addStretch()
-        tabs.addTab(tab_cam, "Camera")
-        self.p_layout.addWidget(tabs)
+        # Key becomes "Cam_FOV"
+        self.add_sliders("Cam", [("FOV", 20, 120, 45, 1.0)], cam_grid, self.update_scene)
+        grp_cam = QGroupBox("Camera"); grp_cam.setLayout(cam_grid)
+        scene_layout.addWidget(grp_cam)
+        
+        # Lighting
+        light_grid = QGridLayout()
+        # Keys become "Light_Exp", "Light_Gam", etc.
+        light_params = [
+            ("Exp", 1, 50, 10, 0.1),   # Exposure 0.1 - 5.0
+            ("Gam", 10, 30, 22, 0.1),  # Gamma 1.0 - 3.0
+            ("Amb", 0, 100, 40, 0.01)  # Ambient 0.0 - 1.0
+        ]
+        self.add_sliders("Light", light_params, light_grid, self.update_scene)
+        grp_light = QGroupBox("Lighting"); grp_light.setLayout(light_grid)
+        scene_layout.addWidget(grp_light)
+        
+        scene_layout.addStretch()
+        tabs.addTab(self.tab_scene, "Scene Settings")
+
+    def toggle_mask(self, checked):
+        """Toggles between Red Cylinder (Debug) and Invisible Occluder (Production)"""
+        self.viewer.debug_occluder = checked
+        self.viewer.update()
+
+    def update_scene(self):
+        # Callback for Tab 2 sliders
+        if "Cam_FOV" in self.sliders:
+            self.viewer.fov = self.sliders["Cam_FOV"]['obj'].value()
+            
+        if "Light_Exp" in self.sliders:
+            # Check if renderer supports exposure (it should with updated code)
+            if hasattr(self.viewer, 'exposure'):
+                self.viewer.exposure = self.sliders["Light_Exp"]['obj'].value() * 0.1
+                self.viewer.gamma = self.sliders["Light_Gam"]['obj'].value() * 0.1
+                self.viewer.ambient_str = self.sliders["Light_Amb"]['obj'].value() * 0.01
+                
+        self.viewer.update()
 
     def set_active_item(self, item):
         # 1. Save old
@@ -84,7 +140,7 @@ class TryOnWindow(QWidget):
         # 2. Select Strategy
         if item.category == "Bracelet":
             self.strategy = WristStrategy()
-        elif item.category == "Ring":  # <--- ADD THIS
+        elif item.category == "Ring":
             self.strategy = RingStrategy()
         # elif item.category == "Necklace": self.strategy = NeckStrategy()
         
@@ -142,14 +198,25 @@ class TryOnWindow(QWidget):
         self.btn_ai.setText("AI TRACKING: ON" if checked else "Enable AI")
 
     def rebuild_controls(self):
-        """Asks the Strategy what sliders it needs and draws them."""
-        # Clear old controls
-        for i in reversed(range(self.dynamic_layout.count())): 
-            self.dynamic_layout.itemAt(i).widget().setParent(None)
-        self.sliders = {}
+        """Rebuilds ONLY the strategy sliders, keeping Scene sliders intact."""
+        # 1. Safe Layout Clear (Handles Widgets AND Spacers)
+        while self.dynamic_layout.count():
+            item = self.dynamic_layout.takeAt(0) # Take the first item
+            widget = item.widget()
+            if widget:
+                widget.setParent(None) # Remove widget
+            # If it's a spacer (None), takeAt already removed it from the layout
+        
+        # 2. Clean up self.sliders (Remove non-scene keys)
+        # We assume Scene keys start with "Cam_" or "Light_"
+        scene_prefixes = ("Cam_", "Light_")
+        keys_to_remove = [k for k in self.sliders if not k.startswith(scene_prefixes)]
+        for k in keys_to_remove:
+            del self.sliders[k]
 
         if not self.strategy: return
 
+        # 3. Add new sliders
         # Get definitions: [(Key, Label, Min, Max, Default, Scale), ...]
         defs = self.strategy.get_slider_definitions()
         
@@ -168,7 +235,9 @@ class TryOnWindow(QWidget):
             # We use a closure (lambda) to capture the specific 'key'
             sld.valueChanged.connect(lambda val, k=key: self.on_slider_change(k, val))
             
-            self.sliders[key] = sld
+            # Store in dict
+            self.sliders[key] = {'obj': sld, 'default': def_v}
+            
             grid.addWidget(lbl, row, 0)
             grid.addWidget(sld, row, 1)
             row += 1
@@ -213,7 +282,6 @@ class TryOnWindow(QWidget):
             
         else:
             self.txt.setText("Manual / No AI")
-            # You could add a 'manual fallback' matrix here if you want
 
         self.viewer.update_bg(frame)
         self.viewer.update()

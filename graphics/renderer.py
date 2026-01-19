@@ -47,6 +47,9 @@ class ARViewerWidget(QOpenGLWidget):
         self.diffuse_str = 0.8
         self.w_w, self.w_h = 800, 600
 
+        self.exposure = 1.0
+        self.gamma = 2.2
+
         # camera settings
         self.cam_w = 640
         self.cam_h = 480
@@ -286,7 +289,9 @@ class ARViewerWidget(QOpenGLWidget):
         glUniform3f(self.loc_l_pos, self.light_pos[0], self.light_pos[1], self.light_pos[2])
         glUniform1f(self.loc_l_amb, self.ambient_str)
         glUniform1f(self.loc_l_diff, self.diffuse_str)
-        
+
+        glUniform1f(glGetUniformLocation(self.prog_mesh, "u_exposure"), self.exposure)
+        glUniform1f(glGetUniformLocation(self.prog_mesh, "u_gamma"), self.gamma)        
         # Occluder
         # We now check for 'cylinder_ready' and use 'vao_cylinder'
         if self.cylinder_ready and self.occluder_instances:

@@ -37,7 +37,9 @@ class RingStrategy(TrackingStrategy):
             "Finger": 3,    # Default to Ring Finger
             "Rot_X": 90,    # Rings usually face 'forward' (90deg tilt)
             "Rot_Y": 0, 
-            "Rot_Z": 0
+            "Rot_Z": 0,
+            "Occ_Radius": 100, # 100% of calculated thickness
+            "Occ_Len": 100     # 100% of bone length
         }
 
     def get_slider_definitions(self):
@@ -47,7 +49,10 @@ class RingStrategy(TrackingStrategy):
             ("Slide", "Position %", 0, 100, 50, 0.01), # 0 to 1 along bone
             ("Rot_X", "Tilt X", -180, 180, 90, 1.0),
             ("Rot_Y", "Tilt Y", -180, 180, 0, 1.0),
-            ("Rot_Z", "Spin", -180, 180, 0, 1.0)
+            ("Rot_Z", "Spin", -180, 180, 0, 1.0),
+            # OCCLUDER CONTROLS (Merged!)
+            ("Occ_Radius", "Mask Thick", 50, 200, 100, 0.01),
+            ("Occ_Len", "Mask Length", 50, 150, 100, 0.01)
         ]
 
     def process_frame(self, results, w, h):
@@ -147,11 +152,16 @@ class RingStrategy(TrackingStrategy):
                     # Align Y axis to vector (MCP -> PIP)
                     # Place at 'Slide' position
                     mat_jewel = self._get_aligned_matrix(p_mcp, p_pip)
+                    # 3. Occluder Calculation
+                    rad_scale = self.settings.get("Occ_Radius", 100) / 100.0
+                    len_scale = self.settings.get("Occ_Len", 100) / 100.0
+                    
+                    # Extend the bone slightly based on slider
+                    p_pip_extended = p_mcp + (p_pip - p_mcp) * len_scale
                     
                     # B. The Occluder (Bone)
                     # Stretch cylinder from MCP to PIP
-                    mat_occ = self._get_capsule_matrix(p_mcp, p_pip, radius_scale=0.9) # Slightly thinner than ring
-                    
+                    mat_occ = self._get_capsule_matrix(p_mcp, p_pip_extended, radius_scale=0.9 * rad_scale)                    
                     render_commands.append({'type': 'mesh', 'matrix': mat_jewel})
                     render_commands.append({'type': 'occluder', 'matrix': mat_occ})
 
