@@ -16,8 +16,10 @@ SUPPORTED_CATEGORIES = [
     "Earring", 
     "Waist Band", 
     "Nose Pin", 
-    "Forehead Pendant"
+    "Forehead Pendant",
+    "Collection"
 ]
+
 class AddItemDialog(QDialog):
     """Popup to add new jewelry. Forces category selection."""
     def __init__(self, parent=None):
@@ -32,20 +34,27 @@ class AddItemDialog(QDialog):
         # Name
         layout.addWidget(QLabel("Item Name:"))
         self.txt_name = QLineEdit()
+        self.txt_name.setPlaceholderText("e.g. Gold Bridal Set")
         layout.addWidget(self.txt_name)
         
         # Category (RESTRICTED)
         layout.addWidget(QLabel("Category (Tracking Type):"))
         self.cmb_cat = QComboBox()
         self.cmb_cat.addItems(SUPPORTED_CATEGORIES)
+        self.cmb_cat.currentTextChanged.connect(self.on_category_change)
         layout.addWidget(self.cmb_cat)
         
         # Model Path
-        layout.addWidget(QLabel("3D Model (.obj, .glb):"))
+        self.lbl_model = QLabel("3D Model (.obj, .glb):") # Save ref to change text
+        layout.addWidget(self.lbl_model)
+        
         h_model = QHBoxLayout()
-        self.txt_model = QLineEdit(); self.txt_model.setReadOnly(True)
-        btn_model = QPushButton("Browse"); btn_model.clicked.connect(self.browse_model)
-        h_model.addWidget(self.txt_model); h_model.addWidget(btn_model)
+        self.txt_model = QLineEdit()
+        self.txt_model.setReadOnly(True)
+        self.btn_browse_model = QPushButton("Browse") # Save ref to change text
+        self.btn_browse_model.clicked.connect(self.browse_model)
+        h_model.addWidget(self.txt_model)
+        h_model.addWidget(self.btn_browse_model)
         layout.addLayout(h_model)
         
         # Thumbnail Path
@@ -64,8 +73,30 @@ class AddItemDialog(QDialog):
         h_btns.addWidget(btn_cancel); h_btns.addWidget(btn_save)
         layout.addLayout(h_btns)
 
+        # Trigger initial state
+        self.on_category_change(self.cmb_cat.currentText())
+
+    def on_category_change(self, text):
+        """Switches UI between File Mode and Folder Mode"""
+        if text == "Collection":
+            self.lbl_model.setText("Collection Folder (Must contain .obj files):")
+            self.btn_browse_model.setText("Select Folder")
+            self.txt_model.setPlaceholderText("Select directory containing set items...")
+        else:
+            self.lbl_model.setText("3D Model (.obj, .glb):")
+            self.btn_browse_model.setText("Browse File")
+            self.txt_model.setPlaceholderText("Select a single 3D model file...")
+
     def browse_model(self):
-        f, _ = QFileDialog.getOpenFileName(self, "Select 3D Model", "", "3D Files (*.obj *.glb *.gltf)")
+        cat = self.cmb_cat.currentText()
+        
+        if cat == "Collection":
+            # Folder Picker
+            f = QFileDialog.getExistingDirectory(self, "Select Collection Folder")
+        else:
+            # File Picker
+            f, _ = QFileDialog.getOpenFileName(self, "Select 3D Model", "", "3D Files (*.obj *.glb *.gltf)")
+            
         if f: self.txt_model.setText(f)
 
     def browse_thumb(self):
@@ -73,9 +104,29 @@ class AddItemDialog(QDialog):
         if f: self.txt_thumb.setText(f)
         
     def validate_and_accept(self):
-        if not self.txt_name.text() or not self.txt_model.text():
-            QMessageBox.warning(self, "Missing Data", "Name and 3D Model are required.")
+        name = self.txt_name.text()
+        path = self.txt_model.text()
+        cat = self.cmb_cat.currentText()
+
+        if not name or not path:
+            QMessageBox.warning(self, "Missing Data", "Name and Path are required.")
             return
+
+        # Validation Logic
+        if cat == "Collection":
+            if not os.path.isdir(path):
+                QMessageBox.warning(self, "Error", "For Collections, you must select a Directory.")
+                return
+            # Check for .obj files
+            has_obj = any(f.lower().endswith('.obj') for f in os.listdir(path))
+            if not has_obj:
+                QMessageBox.warning(self, "Error", "Selected folder contains no .obj files!\nPlease add necklace.obj, earring.obj etc.")
+                return
+        else:
+            if not os.path.isfile(path):
+                QMessageBox.warning(self, "Error", "File not found.")
+                return
+
         self.accept()
         
     def get_data(self):
@@ -111,7 +162,11 @@ class JewelryCard(QFrame):
             pix = QPixmap(item.thumbnail_path)
             self.lbl_img.setPixmap(pix.scaled(200, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
-            self.lbl_img.setText(item.category[:2].upper())
+            # Show "SET" for collections, "RG" for Ring, etc.
+            if item.category == "Collection":
+                self.lbl_img.setText("SET")
+            else:
+                self.lbl_img.setText(item.category[:2].upper())
             self.lbl_img.setStyleSheet("font-size: 40px; color: #555; background-color: rgba(0,0,0,0.2); border-radius: 16px 16px 0 0;")
         
         layout.addWidget(self.lbl_img)

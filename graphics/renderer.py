@@ -12,31 +12,29 @@ from utils.mesh_loader import load_mesh_data
 class ARViewerWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # --- STORAGE UPGRADE: Dictionary for Collections ---
+        self.meshes = {} # Format: {'neck': {'vao': int, 'tex': int, 'count': int}, ...}
+        
         # State Flags
-        self.mesh_ready = False
-        self.occluder_ready = False
         self.camera_ready = False
         self.show_grid = False
-        self.debug_occluder = True 
+        self.debug_occluder = False 
+        self.cylinder_ready = False
 
-        self.vao_debug = None
-        self.debug_count = 0
-        self.vao_gizmo = None  # Axis Gizmo for the object
-        
         # GL IDs
-        self.mesh_tex_id = None
         self.cam_tex_id = None
-        self.vao_mesh = None
-        self.vao_occluder = None
+        self.vao_bg = None
+        self.vao_debug = None
+        self.vao_gizmo = None
         
-        # Matrices
-        self.proj = np.eye(4, dtype=np.float32)
-        self.view = np.eye(4, dtype=np.float32)
-        # REPLACE 'self.model_bracelet' with this:
-        self.render_instances = [] # List of dicts: {'matrix': mat4, 'type': 'mesh'/'occluder'}
+        # Occluder (Procedural Cylinder)
+        self.vao_cylinder = None
+        self.idx_count_cylinder = 0
         
-        # Keep Occluder instances separate or unified? Let's unify for simplicity in loop
-        self.occluder_instances = [] 
+        # Render Lists
+        self.render_instances = []   # List of {'matrix': mat4, 'model_key': 'neck'}
+        self.occluder_instances = [] # List of matrices
         
         # Scene Settings
         self.fov = 40.0
@@ -45,16 +43,20 @@ class ARViewerWidget(QOpenGLWidget):
         self.light_pos = [0.0, 10.0, 10.0]
         self.ambient_str = 0.4
         self.diffuse_str = 0.8
-        self.w_w, self.w_h = 800, 600
-
+        
         self.exposure = 1.0
         self.gamma = 2.2
 
-        # camera settings
+        # Camera / Viewport
         self.cam_w = 640
         self.cam_h = 480
         self.img_aspect = 640/480
-        self.viewport_rect = (0, 0, 640, 480) # x, y, w, h
+        self.viewport_rect = (0, 0, 640, 480)
+        
+        self.proj = np.eye(4, dtype=np.float32)
+        self.view = np.eye(4, dtype=np.float32)
+        
+        self.debug_count = 0
 
     def initializeGL(self):
         glEnable(GL_DEPTH_TEST)
@@ -62,13 +64,15 @@ class ARViewerWidget(QOpenGLWidget):
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glClearColor(0.1, 0.1, 0.1, 1.0)
         
-        # Compile Shaders
-        self.prog_mesh = compileProgram(compileShader(MESH_VS, GL_VERTEX_SHADER), compileShader(MESH_FS, GL_FRAGMENT_SHADER))
-        self.prog_bg = compileProgram(compileShader(BG_VS, GL_VERTEX_SHADER), compileShader(BG_FS, GL_FRAGMENT_SHADER))
-        # Compile New Debug Shader
-        self.prog_debug = compileProgram(compileShader(DEBUG_VS, GL_VERTEX_SHADER), compileShader(DEBUG_FS, GL_FRAGMENT_SHADER))
-       
-        # Cache Uniform Locations (Mesh)
+        try:
+            self.prog_mesh = compileProgram(compileShader(MESH_VS, GL_VERTEX_SHADER), compileShader(MESH_FS, GL_FRAGMENT_SHADER))
+            self.prog_bg = compileProgram(compileShader(BG_VS, GL_VERTEX_SHADER), compileShader(BG_FS, GL_FRAGMENT_SHADER))
+            self.prog_debug = compileProgram(compileShader(DEBUG_VS, GL_VERTEX_SHADER), compileShader(DEBUG_FS, GL_FRAGMENT_SHADER))
+            self.prog_occ = compileProgram(compileShader(MESH_VS, GL_VERTEX_SHADER), compileShader(OCCLUDER_FS, GL_FRAGMENT_SHADER))
+        except Exception as e:
+            print("Shader Compile Error:", e)
+
+        # Cache Uniforms
         self.loc_m_model = glGetUniformLocation(self.prog_mesh, "u_model")
         self.loc_m_view = glGetUniformLocation(self.prog_mesh, "u_view")
         self.loc_m_proj = glGetUniformLocation(self.prog_mesh, "u_proj")
@@ -79,7 +83,7 @@ class ARViewerWidget(QOpenGLWidget):
         self.loc_l_amb = glGetUniformLocation(self.prog_mesh, "u_ambient_str")
         self.loc_l_diff = glGetUniformLocation(self.prog_mesh, "u_diffuse_str")
         
-        # Cache Uniform Locations (Grid)
+        # Debug Uniforms
         self.loc_d_model = glGetUniformLocation(self.prog_debug, "u_model")
         self.loc_d_view = glGetUniformLocation(self.prog_debug, "u_view")
         self.loc_d_proj = glGetUniformLocation(self.prog_debug, "u_proj")
@@ -88,6 +92,17 @@ class ARViewerWidget(QOpenGLWidget):
         self._init_debug_layer() 
         self.init_occluder_primitive()
 
+    # --- MEMORY MANAGEMENT ---
+    def clear_scene(self):
+        """Frees GPU memory for all loaded meshes."""
+        self.makeCurrent()
+        for key, mesh_data in self.meshes.items():
+            if mesh_data['tex']: glDeleteTextures([mesh_data['tex']])
+            if mesh_data['vao']: glDeleteVertexArrays(1, [mesh_data['vao']])
+        self.meshes = {}
+        self.doneCurrent()
+
+    # --- HELPER FUNCTIONS ---
     def _init_bg_quad(self):
         data = np.array([-1,-1,0,1, 1,-1,1,1, -1,1,0,0, 1,1,1,0], dtype=np.float32)
         self.vao_bg = glGenVertexArrays(1); glBindVertexArray(self.vao_bg)
@@ -97,106 +112,71 @@ class ARViewerWidget(QOpenGLWidget):
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 16, ctypes.c_void_p(8))
 
     def _init_debug_layer(self):
-        # 1. FLOOR GRID (Gray Lines) - Static World Grid
-        lines = []
-        colors = []
-        size = 50  # Huge grid
-        step = 5
-        grid_y = -10 # Push grid down so it doesn't cut through the bracelet
-        
-        # Create lines for a floor grid
+        # Grid Lines
+        lines = []; colors = []
+        size = 50; step = 5; grid_y = -10
         for i in range(-size, size + 1, step):
-            # Lines along X
-            lines.extend([i, grid_y, -size,  i, grid_y, size])
-            colors.extend([0.3, 0.3, 0.3,    0.3, 0.3, 0.3]) # Gray
-            # Lines along Z
-            lines.extend([-size, grid_y, i,  size, grid_y, i])
-            colors.extend([0.3, 0.3, 0.3,    0.3, 0.3, 0.3])
-
-        self.debug_count = len(lines) // 3
-        data_grid = np.array(lines + colors, dtype=np.float32).reshape(-1) # Flatten logic
+            lines.extend([i, grid_y, -size, i, grid_y, size])
+            colors.extend([0.3]*6)
+            lines.extend([-size, grid_y, i, size, grid_y, i])
+            colors.extend([0.3]*6)
         
-        # Interleaved: [x,y,z, r,g,b]... actually simpler to do separated for lines but let's stack
-        # Correct packing: Vertex 1 [Pos, Col], Vertex 2 [Pos, Col]...
-        # Let's rebuild properly:
         debug_data = []
         for i in range(0, len(lines), 3):
-            # Pos (x,y,z)
             debug_data.extend(lines[i:i+3])
-            # Col (r,g,b) -> corresponding index in colors
             debug_data.extend(colors[i:i+3])
-            
         debug_data = np.array(debug_data, dtype=np.float32)
 
+        self.debug_count = len(lines) // 3
         self.vao_debug = glGenVertexArrays(1); glBindVertexArray(self.vao_debug)
         vbo = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo)
         glBufferData(GL_ARRAY_BUFFER, debug_data.nbytes, debug_data, GL_STATIC_DRAW)
         glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(0))
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(12))
 
-        # 2. AXIS GIZMO (Red/Green/Blue) - Attached to Object
-        # Line starts at 0,0,0 and goes to 10,0,0
-        gizmo_verts = [
-            0,0,0,  1,0,0,  # X Axis (Red)
-            10,0,0, 1,0,0,
-            0,0,0,  0,1,0,  # Y Axis (Green)
-            0,10,0, 0,1,0,
-            0,0,0,  0,0,1,  # Z Axis (Blue)
-            0,0,10, 0,0,1
-        ]
-        g_data = np.array(gizmo_verts, dtype=np.float32)
-        
+        # Axis Gizmo
+        gizmo = [0,0,0, 1,0,0, 10,0,0, 1,0,0, 0,0,0, 0,1,0, 0,10,0, 0,1,0, 0,0,0, 0,0,1, 0,0,10, 0,0,1]
+        g_data = np.array(gizmo, dtype=np.float32)
         self.vao_gizmo = glGenVertexArrays(1); glBindVertexArray(self.vao_gizmo)
         vbo_g = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo_g)
         glBufferData(GL_ARRAY_BUFFER, g_data.nbytes, g_data, GL_STATIC_DRAW)
         glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(0))
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(12))
 
+    def _draw_grid(self):
+        glUseProgram(self.prog_debug)
+        glUniformMatrix4fv(self.loc_d_proj, 1, GL_TRUE, self.proj)
+        glUniformMatrix4fv(self.loc_d_view, 1, GL_TRUE, self.view)
+        glUniformMatrix4fv(self.loc_d_model, 1, GL_TRUE, np.eye(4, dtype=np.float32))
+        if self.vao_debug:
+            glBindVertexArray(self.vao_debug)
+            glDrawArrays(GL_LINES, 0, self.debug_count)
+
     def _create_cylinder_mesh(self):
         """Generates a simple unit cylinder (height=1, radius=1) along Y axis."""
         # Simple 12-sided cylinder
         segments = 12
-        verts = []
-        faces = []
-        
-        # Top and Bottom circles
-        for y in [0.0, 1.0]: # Bottom at 0, Top at 1
+        verts = []; faces = []
+        for y in [0.0, 1.0]:
             for i in range(segments):
                 theta = 2.0 * np.pi * i / segments
-                x = np.cos(theta)
-                z = np.sin(theta)
-                verts.extend([x, y, z]) # Pos
-                verts.extend([x, 0, z]) # Normal (Approx)
-                verts.extend([i/segments, y]) # UV
-
-        # Generate Faces (Triangles)
+                verts.extend([np.cos(theta), y, np.sin(theta), np.cos(theta), 0, np.sin(theta), i/segments, y])
         for i in range(segments):
             next_i = (i + 1) % segments
-            # Bottom vertices are 0..11, Top are 12..23
-            b1, b2 = i, next_i
-            t1, t2 = i + segments, next_i + segments
-            
-            # Quad formed by b1, b2, t2, t1
-            faces.extend([b1, t1, b2])
-            faces.extend([b2, t1, t2])
-
+            b1, b2, t1, t2 = i, next_i, i+segments, next_i+segments
+            faces.extend([b1, t1, b2, b2, t1, t2])
         return np.array(verts, dtype=np.float32), np.array(faces, dtype=np.uint32)
 
     def init_occluder_primitive(self):
         """Creates the VBO for the generic cylinder occluder."""
         self.makeCurrent()
         v_data, i_data = self._create_cylinder_mesh()
-        
         self.vao_cylinder = glGenVertexArrays(1); glBindVertexArray(self.vao_cylinder)
         vbo = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo)
         glBufferData(GL_ARRAY_BUFFER, v_data.nbytes, v_data, GL_STATIC_DRAW)
         ebo = glGenBuffers(1); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_data.nbytes, i_data, GL_STATIC_DRAW)
-        
-        stride = 32
-        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
-        # We don't really need normals/UVs for invisible occluders, but keeping format consistent
-        
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(0))
         self.idx_count_cylinder = len(i_data)
         self.cylinder_ready = True
 
@@ -208,49 +188,26 @@ class ARViewerWidget(QOpenGLWidget):
         # Calculate new viewport (Black bars logic)
         if win_aspect > self.img_aspect:
             # Window is too wide (black bars on sides)
-            new_h = h
-            new_w = int(h * self.img_aspect)
-            x_offset = (w - new_w) // 2
-            y_offset = 0
+            new_h = h; new_w = int(h * self.img_aspect); x_off = (w - new_w) // 2; y_off = 0
         else:
             # Window is too tall (black bars on top/bottom)
-            new_w = w
-            new_h = int(w / self.img_aspect)
-            x_offset = 0
-            y_offset = (h - new_h) // 2
-            
-        self.viewport_rect = (x_offset, y_offset, new_w, new_h)
+            new_w = w; new_h = int(w / self.img_aspect); x_off = 0; y_off = (h - new_h) // 2
+        self.viewport_rect = (x_off, y_off, new_w, new_h)
 
     def update_projection(self, aspect_ratio=None):
         if aspect_ratio is None: aspect_ratio = self.img_aspect
-        
-        # fov is stored in self.fov (controlled by slider)
-        # Convert FOV to radians
         f = 1.0 / np.tan(np.radians(self.fov) / 2.0)
         zn, zf = self.near_plane, self.far_plane
-        
-        # Standard Perspective Matrix
-        self.proj = np.array([
-            [f / aspect_ratio, 0, 0, 0],
-            [0, f, 0, 0],
-            [0, 0, (zf + zn) / (zn - zf), (2 * zf * zn) / (zn - zf)],
-            [0, 0, -1, 0]
-        ], dtype=np.float32)
+        self.proj = np.array([[f/aspect_ratio,0,0,0], [0,f,0,0], [0,0,(zf+zn)/(zn-zf), (2*zf*zn)/(zn-zf)], [0,0,-1,0]], dtype=np.float32)
 
     def paintGL(self):
-        # 1. Clear the WHOLE window (including black bars)
         glViewport(0, 0, self.width(), self.height())
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
-        # 2. Set Viewport to the "Camera Box" only
         vx, vy, vw, vh = self.viewport_rect
         glViewport(vx, vy, vw, vh)
-        
-        # 3. Update Projection to match this new box
-        # IMPORTANT: The Aspect Ratio sent to the projection matrix must match the IMAGE, not the Window.
         self.update_projection(aspect_ratio=self.img_aspect)
         
-        # 1. Draw Background
+        # 1. Background
         if self.camera_ready:
             glDisable(GL_DEPTH_TEST); glUseProgram(self.prog_bg)
             glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, self.cam_tex_id)
@@ -258,85 +215,69 @@ class ARViewerWidget(QOpenGLWidget):
         
         glEnable(GL_DEPTH_TEST) 
         
-        # 2. DRAW DEBUG LAYER ---
+        # 2. Debug Grid
         if self.show_grid:
-            glUseProgram(self.prog_debug)
-            glUniformMatrix4fv(self.loc_d_proj, 1, GL_TRUE, self.proj)
-            glUniformMatrix4fv(self.loc_d_view, 1, GL_TRUE, self.view)
-            
-            # 1. Draw Floor Grid (Identity Model)
-            identity = np.eye(4, dtype=np.float32)
-            glUniformMatrix4fv(self.loc_d_model, 1, GL_TRUE, identity)
-            glBindVertexArray(self.vao_debug)
-            glDrawArrays(GL_LINES, 0, self.debug_count)
-            
-            # 2. Draw Axis Gizmo (Attached to Bracelet!)
-            # We use the bracelet's model matrix so the axes rotate WITH the bracelet
-            if self.mesh_ready:
-                # We disable depth test so you can see axis even if inside the object
-                glDisable(GL_DEPTH_TEST) 
-                glLineWidth(3.0) # Make axes thick
-                glUniformMatrix4fv(self.loc_d_model, 1, GL_TRUE, self.model_bracelet)
-                glBindVertexArray(self.vao_gizmo)
-                glDrawArrays(GL_LINES, 0, 6) # 3 lines * 2 verts
-                glLineWidth(1.0)
-                glEnable(GL_DEPTH_TEST)
-        
-        # 3. Draw Meshes
-        glUseProgram(self.prog_mesh)
-        glUniformMatrix4fv(self.loc_m_proj, 1, GL_TRUE, self.proj)
-        glUniformMatrix4fv(self.loc_m_view, 1, GL_TRUE, self.view)
-        glUniform3f(self.loc_l_pos, self.light_pos[0], self.light_pos[1], self.light_pos[2])
-        glUniform1f(self.loc_l_amb, self.ambient_str)
-        glUniform1f(self.loc_l_diff, self.diffuse_str)
+            self._draw_grid()
 
-        glUniform1f(glGetUniformLocation(self.prog_mesh, "u_exposure"), self.exposure)
-        glUniform1f(glGetUniformLocation(self.prog_mesh, "u_gamma"), self.gamma)        
-        # Occluder
-        # We now check for 'cylinder_ready' and use 'vao_cylinder'
+        # 3. Draw Occluders (Procedural)
         if self.cylinder_ready and self.occluder_instances:
-            glUniform1i(self.loc_m_has_tex, 0)
-            glBindVertexArray(self.vao_cylinder) # <--- USE CYLINDER VAO
+            glUseProgram(self.prog_occ)
+            glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_proj"), 1, GL_TRUE, self.proj)
+            glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_view"), 1, GL_TRUE, self.view)
             
-            # 1. SETUP COLOR/MASKING
             if self.debug_occluder:
-                glUniform4f(self.loc_m_color, 1.0, 0.0, 0.0, 0.5) 
+                glUniform4f(glGetUniformLocation(self.prog_occ, "u_color"), 1.0, 0.0, 0.0, 0.5)
             else:
-                glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE) 
-                glDepthMask(GL_TRUE) 
-
-            # 2. LOOP & DRAW
+                glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE)
+                
+            glBindVertexArray(self.vao_cylinder)
             for instance_mat in self.occluder_instances:
-                glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, instance_mat)
+                glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, instance_mat)
                 glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
 
-            # Restore Color Mask
-            if not self.debug_occluder:
-                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
-        
-        # DRAW JEWELRY MESHES
-        if self.mesh_ready and self.render_instances:
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
 
-            glUniform4f(self.loc_m_color, 1.0, 0.84, 0.0, 1.0) 
-            if self.mesh_tex_id:
-                glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, self.mesh_tex_id)
-                glUniform1i(self.loc_m_tex, 0); glUniform1i(self.loc_m_has_tex, 1)
-            else: glUniform1i(self.loc_m_has_tex, 0)
-            glBindVertexArray(self.vao_mesh)
-                            
-            # LOOP & DRAW
-            for instance_mat in self.render_instances:
-                glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, instance_mat)
-                glDrawElements(GL_TRIANGLES, self.index_count, GL_UNSIGNED_INT, None)
+        # 4. Draw Jewelry Meshes
+        if self.meshes and self.render_instances:
+            glUseProgram(self.prog_mesh)
+            glUniformMatrix4fv(self.loc_m_proj, 1, GL_TRUE, self.proj)
+            glUniformMatrix4fv(self.loc_m_view, 1, GL_TRUE, self.view)
+            glUniform3f(self.loc_l_pos, *self.light_pos)
+            glUniform1f(self.loc_l_amb, self.ambient_str)
+            glUniform1f(self.loc_l_diff, self.diffuse_str)
+            glUniform1f(glGetUniformLocation(self.prog_mesh, "u_exposure"), self.exposure)
+            glUniform1f(glGetUniformLocation(self.prog_mesh, "u_gamma"), self.gamma)   
 
-    def load_object(self, path, is_occluder=False):
-        """Uses the Utility loader to get data, then uploads to GPU."""
+            for inst in self.render_instances:
+                if isinstance(inst, dict):
+                    mat = inst['matrix']
+                    key = inst.get('model_key', 'default')
+                else:
+                    mat = inst
+                    key = 'default'
+
+                if key in self.meshes:
+                    mesh_data = self.meshes[key]
+                    glBindVertexArray(mesh_data['vao'])
+                    if mesh_data['tex']:
+                        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, mesh_data['tex'])
+                        glUniform1i(self.loc_m_has_tex, 1)
+                    else:
+                        glUniform1i(self.loc_m_has_tex, 0)
+                        glUniform4f(self.loc_m_color, 1.0, 0.84, 0.0, 1.0)
+                    
+                    glUniformMatrix4fv(self.loc_m_model, 1, GL_TRUE, mat)
+                    glDrawElements(GL_TRIANGLES, mesh_data['count'], GL_UNSIGNED_INT, None)
+
+    def load_object(self, path, key='default', is_occluder=False):
+        """Loads a mesh and stores it in the dictionary."""
+        # 1. Load Data
         data = load_mesh_data(path, is_occluder)
         if not data: return
 
         self.makeCurrent()
         
-        # Flatten Data for VBO [Verts, Norms, UVs]
+        # 2. Upload to GPU
         interleaved = np.hstack((data.vertices, data.norms, data.uvs)).astype(np.float32)
         
         # Generate VAO/VBO
@@ -360,29 +301,23 @@ class ARViewerWidget(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, data.texture_data.shape[1], data.texture_data.shape[0], 0, GL_RGBA, GL_UNSIGNED_BYTE, data.texture_data)
 
-        # Store IDs based on type
-        if is_occluder:
-            self.vao_occluder = vao
-            self.index_count_occluder = len(data.faces)
-            self.occluder_ready = True
-        else:
-            self.vao_mesh = vao
-            self.mesh_tex_id = tex_id
-            self.index_count = len(data.faces)
-            self.mesh_ready = True
-
+        # 3. Store
+        self.meshes[key] = {
+            'vao': vao,
+            'tex': tex_id,
+            'count': len(data.faces)
+        }
+        
         self.doneCurrent()
         self.update()
 
     def update_bg(self, frame):
         if frame is None: return
         f = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # 1. Update Camera Dimensions (Run once or if changed)
         h, w, _ = f.shape
         if self.cam_w != w or self.cam_h != h:
             self.cam_w, self.cam_h = w, h
             self.img_aspect = w / h
-            # Recalculate viewport immediately
             self.resizeGL(self.width(), self.height())
         self.makeCurrent()
         if not self.cam_tex_id: self.cam_tex_id = glGenTextures(1)
