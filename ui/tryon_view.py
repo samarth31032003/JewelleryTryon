@@ -1,15 +1,18 @@
 # ui/tryon_view.py
 import cv2
 import os
+import numpy as np
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QSlider, QGroupBox, QGridLayout, 
                              QCheckBox, QTextEdit, QScrollArea, QTabWidget,
                              QComboBox)
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
 from graphics.renderer import ARViewerWidget
-from trackers.pose_engine import PoseEngine
+from workers.camera import CameraWorker
+from workers.ai import AIWorker
 
+# Strategies
 from trackers.strategies.wrist import WristStrategy
 from trackers.strategies.ring import RingStrategy
 from trackers.strategies.waist import WaistStrategy
@@ -23,42 +26,59 @@ class TryOnWindow(QWidget):
     def __init__(self, db):
         super().__init__()
         self.db = db
-        self.ai_engine = PoseEngine()
-        self.strategy = None
         self.current_item = None
         self.sliders = {} 
         self.pending_item = None
-        
-        # New State for Dropdown
         self.combo_component = None 
+        self.use_ai = False
 
         self.setup_ui()
         
-        self.cap = cv2.VideoCapture(0)
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.loop)
+        # --- THREAD SETUP ---
+        # 1. Create Workers
+        self.cam_worker = CameraWorker(camera_index=0)
+        self.ai_worker = AIWorker()
+
+        # 2. Connect Camera -> UI (Background Update)
+        self.cam_worker.frame_captured.connect(self.on_frame_received)
+        
+        # 3. Connect AI -> UI (Mesh Update)
+        self.ai_worker.results_ready.connect(self.on_ai_results)
+
+    def start_session(self):
+        """Called by Main when switching TO this screen."""
+        if not self.cam_worker.isRunning():
+            self.cam_worker = CameraWorker(0) # Re-init to be safe
+            self.cam_worker.frame_captured.connect(self.on_frame_received)
+            self.cam_worker.start()
+        
+        if not self.ai_worker.isRunning():
+            self.ai_worker.start()
+
+    def stop_session(self):
+        """Called by Main when switching AWAY from this screen."""
+        self.cam_worker.stop()
+        self.ai_worker.stop()
 
     def setup_ui(self):
         layout = QHBoxLayout(self)
         
-        # 1. Left: Viewer
+        # Left: Viewer
         self.viewer = ARViewerWidget()
         layout.addWidget(self.viewer, stretch=3)
         
-        # 2. Right: Controls Panel
+        # Right: Controls
         self.panel = QWidget()
         self.p_layout = QVBoxLayout(self.panel)
         layout.addWidget(self.panel, stretch=1)
         tabs = QTabWidget()
         self.p_layout.addWidget(tabs)
 
-        # --- TAB 1: ITEM SETTINGS ---
+        # Tab 1: Adjustments
         self.tab_item = QWidget()
         self.item_layout = QVBoxLayout(self.tab_item)
         
-        # NEW: Component Dropdown (Hidden by default)
         self.combo_component = QComboBox()
-        self.combo_component.setStyleSheet("padding: 5px; font-weight: bold;")
         self.combo_component.currentIndexChanged.connect(self.on_component_switch)
         self.combo_component.setVisible(False) 
         self.item_layout.addWidget(self.combo_component)
@@ -81,12 +101,10 @@ class TryOnWindow(QWidget):
 
         self.chk_mask = QCheckBox("Show Occlusion Mask (Debug)")
         self.chk_mask.setChecked(False)
-        self.chk_mask.setStyleSheet("color: #DDD; font-weight: bold; margin: 5px;")
         self.chk_mask.toggled.connect(self.toggle_mask)
         ctrl_layout.addWidget(self.chk_mask)
         
         self.btn_save = QPushButton("Save Settings")
-        self.btn_save.setStyleSheet("background-color: #0078D7; color: white; font-weight: bold; padding: 8px;")
         self.btn_save.clicked.connect(self.save_settings)
         ctrl_layout.addWidget(self.btn_save)
 
@@ -96,40 +114,217 @@ class TryOnWindow(QWidget):
         
         tabs.addTab(self.tab_item, "Item Adjustments")
         
-        # --- TAB 2: SCENE ---
+        # Tab 2: Scene
         self.tab_scene = QWidget()
         scene_layout = QVBoxLayout(self.tab_scene)
-        
-        # Camera
         cam_grid = QGridLayout()
         self.add_sliders("Cam", [("FOV", 20, 120, 45, 1.0)], cam_grid, self.update_scene)
         grp_cam = QGroupBox("Camera"); grp_cam.setLayout(cam_grid)
         scene_layout.addWidget(grp_cam)
         
-        # Lighting
         light_grid = QGridLayout()
         light_params = [("Exp", 1, 50, 10, 0.1), ("Gam", 10, 30, 22, 0.1), ("Amb", 0, 100, 40, 0.01)]
         self.add_sliders("Light", light_params, light_grid, self.update_scene)
         grp_light = QGroupBox("Lighting"); grp_light.setLayout(light_grid)
         scene_layout.addWidget(grp_light)
-        
         scene_layout.addStretch()
         tabs.addTab(self.tab_scene, "Scene Settings")
 
-    # --- NEW: Dropdown Handler ---
-    def on_component_switch(self, index):
-        """Called when user selects a different part of the collection."""
-        if not self.strategy or not isinstance(self.strategy, CollectionStrategy):
-            return
-            
-        key = self.combo_component.currentText()
-        if key:
-            self.strategy.set_active_component(key)
-            self.rebuild_controls() # Re-draw sliders for this component
+    # --- SIGNAL SLOTS (The New "Loop") ---
+    
+    @pyqtSlot(np.ndarray)
+    def on_frame_received(self, frame):
+        """Called every time CameraWorker has a new frame."""
+        # 1. Update Background (Instant)
+        self.viewer.update_bg(frame)
+        
+        # 2. Send to AI (if enabled)
+        if self.use_ai:
+            self.ai_worker.process_frame(frame)
+        else:
+            self.txt.setText("AI Paused")
 
+    @pyqtSlot(list, bool)
+    def on_ai_results(self, commands, face_found):
+        """Called when AIWorker finishes math."""
+        # 1. Update Renderer Lists
+        self.viewer.render_instances = []
+        self.viewer.occluder_instances = []
+        
+        count = 0
+        for cmd in commands:
+            if cmd['type'] == 'mesh':
+                self.viewer.render_instances.append(cmd)
+                count += 1
+            elif cmd['type'] == 'occluder':
+                self.viewer.occluder_instances.append(cmd['matrix'])
+        
+        # 2. Trigger Repaint
+        self.viewer.update()
+        self.txt.setText(f"Active Objects: {count} | Face: {'Yes' if face_found else 'No'}")
+
+    # --- LOGIC CONTROL ---
+
+    def set_active_item(self, item):
+        # 1. Save Old
+        if self.current_item and self.ai_worker.strategy:
+            self.save_settings()
+
+        # 2. Clear Scene
+        self.viewer.clear_scene()
+        self.current_item = item
+        
+        # 3. Create Strategy
+        strategy = None
+        if item.category == "Collection": strategy = CollectionStrategy()
+        elif item.category == "Bracelet": strategy = WristStrategy()
+        elif item.category == "Ring": strategy = RingStrategy()
+        elif item.category == "Waist Band": strategy = WaistStrategy()
+        elif item.category == "Necklace": strategy = NeckStrategy()
+        elif item.category == "Nose Pin": strategy = NoseStrategy()
+        elif item.category == "Earring": strategy = EarringStrategy()
+        elif item.category == "Forehead Pendant": strategy = ForeheadStrategy()
+        
+        # 4. Pass Strategy to AI Worker
+        if strategy:
+            if item.settings:
+                if hasattr(strategy, 'update_settings'):
+                    strategy.update_settings(item.settings)
+                else:
+                    strategy.settings.update(item.settings)
+            
+            self.ai_worker.set_strategy(strategy)
+        
+        # 5. Queue Loading
+        self.pending_item = item
+        self.rebuild_controls()
+        
+        if self.isVisible():
+            QTimer.singleShot(50, self._process_pending_loads)
+
+    def _process_pending_loads(self):
+        """Smart Loader: Handles Files AND Directories."""
+        if not self.pending_item: return
+        path = self.pending_item.model_path
+        
+        if os.path.isdir(path):
+            print(f"Loading Collection: {path}")
+            # Scan Folder (needs to check atleast 2 models and max 4 one for each.)
+            found_parts = {}
+            for fname in os.listdir(path):
+                if fname.lower().endswith('.obj'):
+                    full_path = os.path.join(path, fname)
+                    lower = fname.lower()
+                    key = None
+                    if "neck" in lower: key = "neck"
+                    elif "ear" in lower: key = "ear"
+                    elif "nose" in lower: key = "nose"
+                    elif "tikka" in lower or "fore" in lower: key = "forehead"
+                    
+                    if key:
+                        found_parts[key] = full_path
+                        self.viewer.load_object(full_path, key=key)
+            
+            # Update Strategy with found parts
+            if isinstance(self.ai_worker.strategy, CollectionStrategy):
+                self.ai_worker.strategy.load_components(found_parts)
+                self.rebuild_controls()
+        else:
+            print(f"Loading Single: {path}")
+            self.viewer.load_object(path, key='default')
+
+        self.pending_item = None
+
+    def on_slider_change(self, key, value):
+        # Update AI Worker safely
+        self.ai_worker.update_settings({key: value})
+
+    def save_settings(self):
+        """Gathers all slider values and updates the DB."""
+        if self.current_item and self.ai_worker.strategy:
+            self.db.update_item_settings(self.current_item.id, self.ai_worker.strategy.settings)
+            print("Settings Saved!")
+
+    def toggle_ai(self, checked):
+        self.use_ai = checked
+        self.btn_ai.setText("AI TRACKING: ON" if checked else "Enable AI")
+
+    def rebuild_controls(self):
+        """Rebuilds sliders. Handles Dropdown logic for Collections."""
+        # Clear Old
+        while self.dynamic_layout.count():
+            w = self.dynamic_layout.takeAt(0).widget()
+            if w: w.setParent(None)
+        
+        # Cleanup Sliders dict
+        scene_prefixes = ("Cam_", "Light_")
+        self.sliders = {k:v for k,v in self.sliders.items() if k.startswith(scene_prefixes)}
+
+        if not self.ai_worker.strategy: return
+        strat = self.ai_worker.strategy
+
+        # Handle Dropdown
+        if isinstance(strat, CollectionStrategy):
+            self.combo_component.setVisible(True)
+            current_list = strat.get_component_list()
+            self.combo_component.blockSignals(True)
+            self.combo_component.clear()
+            self.combo_component.addItems(current_list)
+            if strat.active_component:
+                idx = self.combo_component.findText(strat.active_component)
+                if idx >= 0: self.combo_component.setCurrentIndex(idx)
+            self.combo_component.blockSignals(False)
+        else:
+            self.combo_component.setVisible(False)
+
+        # Build Sliders
+        defs = strat.get_slider_definitions()
+        grid = QGridLayout()
+        row = 0
+        for key, label, min_v, max_v, def_v, _ in defs:
+            # Get Value
+            if isinstance(strat, CollectionStrategy):
+                comp = strat.active_component
+                val = def_v
+                if comp and comp in strat.settings:
+                    val = strat.settings[comp].get(key, def_v)
+            else:
+                val = strat.settings.get(key, def_v)
+
+            lbl = QLabel(label)
+            sld = QSlider(Qt.Horizontal)
+            sld.setRange(min_v, max_v)
+            sld.setValue(int(val))
+            sld.valueChanged.connect(lambda v, k=key: self.on_slider_change(k, v))
+            
+            self.sliders[key] = {'obj': sld, 'default': def_v}
+            grid.addWidget(lbl, row, 0); grid.addWidget(sld, row, 1)
+            row += 1
+
+        grp = QGroupBox(f"Adjustments")
+        grp.setLayout(grid)
+        self.dynamic_layout.addWidget(grp)
+        self.dynamic_layout.addStretch()
+
+    def on_component_switch(self, index):
+        if isinstance(self.ai_worker.strategy, CollectionStrategy):
+            key = self.combo_component.currentText()
+            if key:
+                self.ai_worker.strategy.set_active_component(key)
+                self.rebuild_controls()
+
+    # --- HELPERS ---
     def toggle_mask(self, checked):
         self.viewer.debug_occluder = checked
         self.viewer.update()
+
+    def add_sliders(self, prefix, params, layout, callback=None):
+        for i, (n, min_v, max_v, def_v, scale) in enumerate(params):
+            key = f"{prefix}_{n}"
+            l = QLabel(n); s = QSlider(Qt.Horizontal); s.setRange(min_v, max_v); s.setValue(def_v)
+            if callback: s.valueChanged.connect(callback)
+            self.sliders[key] = {'obj': s, 'scale': scale, 'default': def_v}
+            layout.addWidget(l, i, 0); layout.addWidget(s, i, 1)
 
     def update_scene(self):
         if "Cam_FOV" in self.sliders:
@@ -140,226 +335,13 @@ class TryOnWindow(QWidget):
             self.viewer.ambient_str = self.sliders["Light_Amb"]['obj'].value() * 0.01
         self.viewer.update()
 
-    def set_active_item(self, item):
-        # 1. Save Old Settings
-        if self.current_item and self.strategy:
-            self.save_settings()
-
-        # 2. CLEAR GPU MEMORY (Crucial for Phase 1)
-        self.viewer.clear_scene()
-
-        self.current_item = item
-        
-        # 3. Strategy Selection
-        if item.category == "Collection":
-            self.strategy = CollectionStrategy()
-        elif item.category == "Bracelet":
-            self.strategy = WristStrategy()
-        elif item.category == "Ring":
-            self.strategy = RingStrategy()
-        elif item.category == "Waist Band":
-            self.strategy = WaistStrategy()
-        elif item.category == "Necklace":
-            self.strategy = NeckStrategy()
-        elif item.category == "Nose Pin":
-            self.strategy = NoseStrategy()
-        elif item.category == "Earring":
-            self.strategy = EarringStrategy()
-        elif item.category == "Forehead Pendant": 
-            self.strategy = ForeheadStrategy()
-        
-        # 4. Queue Loading (Directory vs File)
-        self.pending_item = item
-        
-        # 5. Restore Settings
-        if item.settings:
-            self.strategy.update_settings(item.settings)
-
-        # 6. UI Update
-        self.rebuild_controls()
-        if self.isVisible():
-            self._process_pending_loads()
-
     def showEvent(self, event):
-        """Called automatically when window opens."""
         super().showEvent(event)
-        if not self.timer.isActive():
-            self.timer.start(30)
         QTimer.singleShot(50, self._process_pending_loads)
 
-    def _process_pending_loads(self):
-        """Smart Loader: Handles Files AND Directories."""
-        if not self.pending_item: return
-        
-        path = self.pending_item.model_path
-        
-        # Check if Directory (Collection)
-        if os.path.isdir(path):
-            print(f"Loading Collection from: {path}")
-            
-            # Scan Folder (needs to check atleast 2 models and max 4 one for each.)
-            found_parts = {}
-            for fname in os.listdir(path):
-                if fname.lower().endswith('.obj'):
-                    full_path = os.path.join(path, fname)
-                    # Simple Keyword Matching
-                    lower_name = fname.lower()
-                    key = None
-                    if "neck" in lower_name: key = "neck"
-                    elif "ear" in lower_name: key = "ear"
-                    elif "nose" in lower_name: key = "nose"
-                    elif "tikka" in lower_name or "fore" in lower_name: key = "forehead"
-                    
-                    if key:
-                        found_parts[key] = full_path
-                        # Load into Renderer with specific Key
-                        self.viewer.load_object(full_path, key=key)
-            
-            # Init Strategy with found parts
-            if isinstance(self.strategy, CollectionStrategy):
-                self.strategy.load_components(found_parts)
-                # Update UI Dropdown
-                self.rebuild_controls()
-
-        else:
-            # Single File Mode
-            print(f"Loading Single Item: {path}")
-            self.viewer.load_object(path, key='default')
-
-        self.pending_item = None
-
-    def save_settings(self):
-        """Gathers all slider values and updates the DB."""
-        if self.current_item and self.strategy:
-            self.db.update_item_settings(self.current_item.id, self.strategy.settings)
-            print("Settings Saved!")
-
-    def add_sliders(self, prefix, params, layout, callback=None):
-        for i, (n, min_v, max_v, def_v, scale) in enumerate(params):
-            key = f"{prefix}_{n}"
-            l = QLabel(n); s = QSlider(Qt.Horizontal); s.setRange(min_v, max_v); s.setValue(def_v)
-            if callback: s.valueChanged.connect(callback)
-            self.sliders[key] = {'obj': s, 'scale': scale, 'default': def_v}
-            layout.addWidget(l, i, 0); layout.addWidget(s, i, 1)
-
-    def rebuild_controls(self):
-        """Rebuilds sliders. Handles Dropdown logic for Collections."""
-        # 1. Clear Old Sliders
-        while self.dynamic_layout.count():
-            item = self.dynamic_layout.takeAt(0)
-            widget = item.widget()
-            if widget: widget.setParent(None)
-        
-        # 2. Clean up self.sliders (Remove non-scene keys)
-        # We assume Scene keys start with "Cam_" or "Light_"
-        scene_prefixes = ("Cam_", "Light_")
-        keys_to_remove = [k for k in self.sliders if not k.startswith(scene_prefixes)]
-        for k in keys_to_remove: del self.sliders[k]
-
-        if not self.strategy: return
-
-        # 2. Handle Dropdown Visibility
-        if isinstance(self.strategy, CollectionStrategy):
-            self.combo_component.setVisible(True)
-            
-            # Populate if empty or changed
-            current_list = self.strategy.get_component_list()
-            # If combo items don't match strategy items, refresh
-            combo_items = [self.combo_component.itemText(i) for i in range(self.combo_component.count())]
-            if set(current_list) != set(combo_items):
-                self.combo_component.blockSignals(True)
-                self.combo_component.clear()
-                self.combo_component.addItems(current_list)
-                # Select active
-                if self.strategy.active_component:
-                    idx = self.combo_component.findText(self.strategy.active_component)
-                    if idx >= 0: self.combo_component.setCurrentIndex(idx)
-                self.combo_component.blockSignals(False)
-        else:
-            self.combo_component.setVisible(False)
-
-        # 3. Add Sliders
-        defs = self.strategy.get_slider_definitions()
-        grid = QGridLayout()
-        row = 0
-        for key, label, min_v, max_v, def_v, _ in defs:
-            # Handle nested settings for Collections? 
-            # Strategy.settings might be {scale: 100} OR {neck: {scale: 100}}
-            # But get_slider_definitions returns generic keys.
-            # Strategy.settings[key] access handles this abstraction in base/collection class.
-            
-            # For CollectionStrategy, self.strategy.settings is the MASTER dict {neck: {...}}
-            # But we want the value for the ACTIVE component.
-            # We need a helper to get the value.
-            
-            if isinstance(self.strategy, CollectionStrategy):
-                # Dig into sub-strategy settings
-                comp = self.strategy.active_component
-                val = def_v
-                if comp and comp in self.strategy.settings:
-                    val = self.strategy.settings[comp].get(key, def_v)
-            else:
-                val = self.strategy.settings.get(key, def_v)
-            
-            lbl = QLabel(label)
-            sld = QSlider(Qt.Horizontal)
-            sld.setRange(min_v, max_v)
-            sld.setValue(int(val))
-            sld.valueChanged.connect(lambda val, k=key: self.on_slider_change(k, val))
-            
-            self.sliders[key] = {'obj': sld, 'default': def_v}
-            grid.addWidget(lbl, row, 0); grid.addWidget(sld, row, 1)
-            row += 1
-
-        grp = QGroupBox(f"Adjustments: {self.strategy.active_component if isinstance(self.strategy, CollectionStrategy) else ''}")
-        grp.setLayout(grid)
-        self.dynamic_layout.addWidget(grp)
-        self.dynamic_layout.addStretch()
-
-    def on_slider_change(self, key, value):
-        # Update the Strategy's memory immediately
-        if self.strategy:
-            self.strategy.update_settings({key: value})
-
-    def toggle_ai(self, checked):
-        self.use_ai = checked
-        self.btn_ai.setText("AI TRACKING: ON" if checked else "Enable AI")
-
-    def loop(self):
-        if not self.cap.isOpened(): return
-        ret, frame = self.cap.read()
-        if not ret: return
-        
-        # Reset Render Lists
-        self.viewer.render_instances = []
-        self.viewer.occluder_instances = []
-        
-        if getattr(self, 'use_ai', False) and self.strategy:
-            results = self.ai_engine.process(frame)
-            h, w, _ = frame.shape
-            
-            commands = self.strategy.process_frame(results, w, h)
-            
-            count = 0
-            for cmd in commands:
-                if cmd['type'] == 'mesh':
-                    # Phase 2: Renderer now accepts Dicts with 'model_key'
-                    # CollectionStrategy adds 'model_key' to cmd
-                    self.viewer.render_instances.append(cmd) 
-                    count += 1
-                elif cmd['type'] == 'occluder':
-                    self.viewer.occluder_instances.append(cmd['matrix'])
-            
-            self.txt.setText(f"Active Objects: {count}")
-        else:
-            self.txt.setText("AI Paused")
-
-        self.viewer.update_bg(frame)
-        self.viewer.update()
-        
     def closeEvent(self, event):
-        """Called when the window is being closed."""
+        """Clean shutdown of threads."""
         self.save_settings()
-        if hasattr(self, 'cap') and self.cap.isOpened(): self.cap.release()
-        if hasattr(self, 'timer'): self.timer.stop()
+        self.cam_worker.stop()
+        self.ai_worker.stop()
         event.accept()
