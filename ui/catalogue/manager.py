@@ -13,7 +13,6 @@ class CatalogueWidget(QWidget):
     def __init__(self, db):
         super().__init__()
         self.db = db
-        self.setStyleSheet(get_stylesheet())
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 40)
@@ -22,14 +21,14 @@ class CatalogueWidget(QWidget):
         h_header = QHBoxLayout()
         title_box = QVBoxLayout()
         lbl_title = QLabel("JEWELRY COLLECTION")
-        lbl_title.setObjectName("HeaderTitle")
+        lbl_title.setObjectName("HeaderTitle") # Uses Global Style
         lbl_sub = QLabel("Select an item to try on")
         lbl_sub.setStyleSheet("color: #888;")
         title_box.addWidget(lbl_title)
         title_box.addWidget(lbl_sub)
         
         btn_add = QPushButton("+ Add New Item")
-        btn_add.setObjectName("PrimaryButton")
+        btn_add.setObjectName("PrimaryButton") # Uses Global Style
         btn_add.clicked.connect(self.open_add_dialog)
         
         h_header.addLayout(title_box)
@@ -40,11 +39,6 @@ class CatalogueWidget(QWidget):
 
         # 2. Tabs
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane { border: 0; }
-            QTabBar::tab { font-size: 14px; padding: 10px 20px; color: #888; }
-            QTabBar::tab:selected { color: white; border-bottom: 2px solid #D4AF37; font-weight: bold; }
-        """)
         layout.addWidget(self.tabs)
 
         # 3. Create Grids (One for ALL, One for each Category)
@@ -55,7 +49,7 @@ class CatalogueWidget(QWidget):
         
         # Category Tabs
         for cat in SUPPORTED_CATEGORIES:
-            # We map "Collection" to "Sets" for display if desired, or keep as is
+            # Display logic: "Collection" -> "Sets"
             display_name = "Sets" if cat == "Collection" else cat + "s"
             self.add_tab(display_name, category_filter=cat)
 

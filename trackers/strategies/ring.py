@@ -147,11 +147,46 @@ class RingStrategy(TrackingStrategy):
                     p_pip = self._unproject(pip_2d, z_est)
                     
                     # 3. Calculate Matrices
-                    
+
+                    # Derive palm normal (roll hint) from PnP hand pose so the ring
+                    # rotates consistently with the hand's orientation.
+                    R_hand, _ = cv2.Rodrigues(rvec_s)
+                    t_hand = tvec_s.flatten()
+                    # Use the same model_3d provided for this hand to get palm basis
+                    p_wrist_cam = (R_hand @ model_3d[0]) + t_hand
+                    p_index_cam = (R_hand @ model_3d[1]) + t_hand
+                    p_pinky_cam = (R_hand @ model_3d[2]) + t_hand
+                    p_middle_cam = (R_hand @ model_3d[3]) + t_hand
+
+                    hand_side = p_pinky_cam - p_index_cam
+                    hs_len = np.linalg.norm(hand_side)
+                    if hs_len > 1e-6:
+                        hand_side /= hs_len
+                    else:
+                        hand_side = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+
+                    hand_forward = p_middle_cam - p_wrist_cam
+                    hf_len = np.linalg.norm(hand_forward)
+                    if hf_len > 1e-6:
+                        hand_forward /= hf_len
+                    else:
+                        hand_forward = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+                    palm_normal = np.cross(hand_side, hand_forward)
+                    pn_len = np.linalg.norm(palm_normal)
+                    if pn_len > 1e-6:
+                        palm_normal /= pn_len
+                    else:
+                        palm_normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+                    # For the mirrored hand, flip the normal so the ring front faces outward.
+                    if label == "Left":
+                        palm_normal = -palm_normal
+
                     # A. The Ring (Mesh)
-                    # Align Y axis to vector (MCP -> PIP)
-                    # Place at 'Slide' position
-                    mat_jewel = self._get_aligned_matrix(p_mcp, p_pip)
+                    # Align Y axis to vector (MCP -> PIP) and set roll around that axis
+                    # using the palm normal projected onto the plane perpendicular to the finger.
+                    mat_jewel = self._get_aligned_matrix(p_mcp, p_pip, roll_hint=palm_normal)
                     # 3. Occluder Calculation
                     rad_scale = self.settings.get("Occ_Radius", 100) / 100.0
                     len_scale = self.settings.get("Occ_Len", 100) / 100.0
@@ -183,8 +218,11 @@ class RingStrategy(TrackingStrategy):
         y = (v - cy) * z / fy
         return np.array([x, y, z], dtype=np.float32)
 
-    def _get_aligned_matrix(self, p_a, p_b):
-        """Aligns object to vector A->B but maintains Aspect Ratio (doesn't stretch Y)"""
+    def _get_aligned_matrix(self, p_a, p_b, roll_hint=None):
+        """Aligns object to vector A->B and applies roll using roll_hint.
+        roll_hint: a 3D direction (e.g., palm normal) used to orient the ring's spin
+        consistently with the hand orientation. If None, defaults to minimal-rotation alignment.
+        """
         vec = p_b - p_a
         length = np.linalg.norm(vec)
         if length < 1e-6: return np.eye(4)
@@ -193,17 +231,42 @@ class RingStrategy(TrackingStrategy):
         slide_pct = self.settings.get("Slide", 50) / 100.0
         pos = p_a + (vec * slide_pct)
         
-        # Rotation: Align Y to Vector
-        y_axis = np.array([0, 1, 0], dtype=np.float64)
-        target_dir = vec / length
-        rot_axis = np.cross(y_axis, target_dir)
-        rot_angle = np.arccos(np.clip(np.dot(y_axis, target_dir), -1.0, 1.0))
-        
-        if np.linalg.norm(rot_axis) < 1e-6:
-            R = np.eye(3)
+        # Rotation: Build basis with Y aligned to vector and X/Z derived from roll_hint
+        y_dir = vec / length
+        if roll_hint is not None:
+            # Project roll_hint onto plane perpendicular to y_dir
+            roll_proj = roll_hint - np.dot(roll_hint, y_dir) * y_dir
+            rp_len = np.linalg.norm(roll_proj)
+            if rp_len > 1e-6:
+                z_dir = roll_proj / rp_len  # choose Z along projected palm normal
+            else:
+                # Fallback: arbitrary perpendicular
+                z_dir = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+                if abs(np.dot(z_dir, y_dir)) > 0.9:
+                    z_dir = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+            x_dir = np.cross(z_dir, y_dir)
+            xl = np.linalg.norm(x_dir)
+            if xl > 1e-6:
+                x_dir /= xl
+            else:
+                # Fallback to orthonormal completion
+                x_dir = np.cross(y_dir, np.array([0.0, 0.0, 1.0]))
+                x_dir /= np.linalg.norm(x_dir)
+            # Recompute z to ensure orthonormal right-handed basis
+            z_dir = np.cross(x_dir, y_dir)
+            z_dir /= np.linalg.norm(z_dir)
+            R = np.stack([x_dir, y_dir, z_dir], axis=1)
         else:
-            rot_axis /= np.linalg.norm(rot_axis)
-            R, _ = cv2.Rodrigues(rot_axis * rot_angle)
+            # Minimal rotation alignment (no roll preservation)
+            y_axis = np.array([0, 1, 0], dtype=np.float64)
+            target_dir = y_dir
+            rot_axis = np.cross(y_axis, target_dir)
+            rot_angle = np.arccos(np.clip(np.dot(y_axis, target_dir), -1.0, 1.0))
+            if np.linalg.norm(rot_axis) < 1e-6:
+                R = np.eye(3)
+            else:
+                rot_axis /= np.linalg.norm(rot_axis)
+                R, _ = cv2.Rodrigues(rot_axis * rot_angle)
 
         # User Rotation adjustments (Local)
         rx = np.radians(self.settings.get("Rot_X", 0))

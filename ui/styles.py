@@ -1,85 +1,136 @@
 # ui/styles.py
 
-# Color Palette
-COLOR_BACKGROUND = "#0F1A2B"
-COLOR_SURFACE = "#141E2F"
-COLOR_SURFACE_ALT = "#1B2C44"
-COLOR_PRIMARY = "#D4AF37"  # Gold
-COLOR_ACCENT = "#B76E79"   # Rose Gold
-COLOR_HIGHLIGHT = "#F5F5F5"
-COLOR_TEXT_MUTED = "rgba(245, 245, 245, 0.7)"
-COLOR_CTA = "#6A0DAD"      # Royal Purple
+# --- 1. THEME VARIABLES (The DNA) ---
+COLORS = {
+    # Brand Colors
+    "primary": "#D4AF37",       # Gold (Luxury)
+    "primary_hover": "#B5952F", # Darker Gold
+    "text_on_primary": "#000000",
+    
+    # Backgrounds
+    "bg_dark": "#1e1e1e",       # Main Window Background
+    "bg_panel": "#2d2d2d",      # Side Panels / Cards
+    "bg_input": "#121212",      # Text Inputs
+    
+    # Text
+    "text_main": "#ffffff",
+    "text_dim": "#aaaaaa",
+    
+    # Functional
+    "danger": "#e74c3c",        # Red (Delete/Cancel)
+    "danger_hover": "#c0392b",
+    "success": "#2ecc71",       # Green
+    "border": "#444444"
+}
 
+FONTS = {
+    "header": "22px 'Segoe UI', sans-serif",
+    "subheader": "16px 'Segoe UI', sans-serif",
+    "body": "14px 'Segoe UI', sans-serif",
+    "small": "12px 'Segoe UI', sans-serif"
+}
+
+# --- 2. THE STYLESHEET GENERATOR ---
 def get_stylesheet():
     return f"""
+    /* --- GLOBAL DEFAULTS --- */
+    QMainWindow, QDialog {{
+        background-color: {COLORS['bg_dark']};
+        color: {COLORS['text_main']};
+    }}
+    
     QWidget {{
-        background-color: {COLOR_BACKGROUND};
-        color: {COLOR_HIGHLIGHT};
-        font-family: 'Segoe UI', 'Inter', sans-serif;
+        font: {FONTS['body']};
+        color: {COLORS['text_main']};
+    }}
+
+    /* --- INPUTS (Text Fields, Dropdowns) --- */
+    QLineEdit, QComboBox {{
+        background-color: {COLORS['bg_input']};
+        border: 1px solid {COLORS['border']};
+        border-radius: 4px;
+        padding: 8px;
+        color: {COLORS['text_main']};
         font-size: 14px;
     }}
-    
-    /* --- HEADERS --- */
-    QLabel#HeaderTitle {{
-        font-size: 32px;
-        font-weight: 700;
-        color: {COLOR_HIGHLIGHT};
+    QLineEdit:focus, QComboBox:focus {{
+        border: 1px solid {COLORS['primary']};
     }}
-    QLabel#SectionTitle {{
-        font-size: 20px;
-        font-weight: 600;
-        color: {COLOR_PRIMARY};
-        border-bottom: 2px solid {COLOR_PRIMARY};
-        padding-bottom: 5px;
+
+    /* --- SCROLL BARS (Modern Look) --- */
+    QScrollBar:vertical {{
+        background: {COLORS['bg_dark']};
+        width: 10px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {COLORS['border']};
+        min-height: 20px;
+        border-radius: 5px;
     }}
     
-    /* --- BUTTONS --- */
-    QPushButton {{
-        background-color: {COLOR_SURFACE_ALT};
-        border: 1px solid rgba(212, 175, 55, 0.5); /* Gold border */
-        border-radius: 12px;
+    /* --- TABS --- */
+    QTabWidget::pane {{ border: 0; }}
+    QTabBar::tab {{
+        background: transparent;
+        color: {COLORS['text_dim']};
         padding: 10px 20px;
-        color: {COLOR_HIGHLIGHT};
-        font-weight: 600;
+        font-size: 14px;
     }}
-    QPushButton:hover {{
-        background-color: {COLOR_PRIMARY};
-        color: #000000;
+    QTabBar::tab:selected {{
+        color: {COLORS['text_main']};
+        border-bottom: 2px solid {COLORS['primary']};
+        font-weight: bold;
     }}
+
+    /* ==============================================
+       COMPONENT CLASSES (Use setObjectName to apply)
+       ============================================== */
+
+    /* [PrimaryButton] - The Gold Action Button */
     QPushButton#PrimaryButton {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {COLOR_CTA}, stop:1 {COLOR_PRIMARY});
+        background-color: {COLORS['primary']};
+        color: {COLORS['text_on_primary']};
         border: none;
+        border-radius: 5px;
+        padding: 10px 20px;
+        font-weight: bold;
+        font-size: 14px;
     }}
+    QPushButton#PrimaryButton:hover {{
+        background-color: {COLORS['primary_hover']};
+    }}
+
+    /* [DestructiveButton] - The Red Danger Button */
     QPushButton#DestructiveButton {{
-        border: 1px solid #ff4444;
-        color: #ff8888;
         background-color: transparent;
+        color: {COLORS['danger']};
+        border: 1px solid {COLORS['danger']};
+        border-radius: 4px;
+        padding: 5px 10px;
     }}
     QPushButton#DestructiveButton:hover {{
-        background-color: #ff4444;
+        background-color: {COLORS['danger']};
         color: white;
     }}
 
-    /* --- CARDS (Catalogue) --- */
+    /* [JewelryCard] - The Item Box in Catalogue */
     QFrame#JewelryCard {{
-        background-color: {COLOR_SURFACE};
+        background-color: {COLORS['bg_panel']};
         border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: 1px solid transparent;
     }}
     QFrame#JewelryCard:hover {{
-        border: 1px solid {COLOR_PRIMARY};
-        background-color: {COLOR_SURFACE_ALT};
+        border: 1px solid {COLORS['primary']};
     }}
-    
-    /* --- INPUTS --- */
-    QLineEdit, QComboBox {{
-        background-color: {COLOR_SURFACE_ALT};
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-        padding: 8px;
-        color: white;
-    }}
-    QLineEdit:focus, QComboBox:focus {{
-        border: 1px solid {COLOR_PRIMARY};
+
+    /* [HeaderTitle] - Large Page Titles */
+    QLabel#HeaderTitle {{
+        font: {FONTS['header']};
+        font-weight: bold;
+        color: {COLORS['primary']};
     }}
     """
+
+# Helper to expose the primary color for Python-side logic (like plotting)
+COLOR_PRIMARY = COLORS['primary']
