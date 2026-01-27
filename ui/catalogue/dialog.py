@@ -2,21 +2,20 @@
 import os
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QComboBox, QPushButton, QFileDialog, 
-                             QMessageBox)
+                             QMessageBox, QTextEdit)
 from ui.styles import get_stylesheet
 
-# Centralized List
 SUPPORTED_CATEGORIES = [
     "Bracelet", "Necklace", "Ring", "Earring", 
     "Waist Band", "Nose Pin", "Forehead Pendant", "Collection"
 ]
 
 class AddItemDialog(QDialog):
-    """Popup to add new jewelry. Forces category selection."""
+    """Popup to add new jewelry with Details."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add New Jewelry")
-        self.resize(400, 400)
+        self.resize(450, 600)
         self.setStyleSheet(get_stylesheet())
         
         layout = QVBoxLayout(self)
@@ -38,14 +37,11 @@ class AddItemDialog(QDialog):
         # Model Path
         self.lbl_model = QLabel("3D Model (.obj, .glb):") 
         layout.addWidget(self.lbl_model)
-        
         h_model = QHBoxLayout()
-        self.txt_model = QLineEdit()
-        self.txt_model.setReadOnly(True)
+        self.txt_model = QLineEdit(); self.txt_model.setReadOnly(True)
         self.btn_browse_model = QPushButton("Browse") 
         self.btn_browse_model.clicked.connect(self.browse_model)
-        h_model.addWidget(self.txt_model)
-        h_model.addWidget(self.btn_browse_model)
+        h_model.addWidget(self.txt_model); h_model.addWidget(self.btn_browse_model)
         layout.addLayout(h_model)
         
         # Thumbnail Path
@@ -55,6 +51,13 @@ class AddItemDialog(QDialog):
         btn_thumb = QPushButton("Browse"); btn_thumb.clicked.connect(self.browse_thumb)
         h_thumb.addWidget(self.txt_thumb); h_thumb.addWidget(btn_thumb)
         layout.addLayout(h_thumb)
+
+        # Details / Summary
+        layout.addWidget(QLabel("Item Details / Summary:"))
+        self.txt_details = QTextEdit()
+        self.txt_details.setPlaceholderText("Enter details like gold purity, weight, price, or collection info...")
+        self.txt_details.setMaximumHeight(100)
+        layout.addWidget(self.txt_details)
         
         # Buttons
         h_btns = QHBoxLayout()
@@ -64,14 +67,13 @@ class AddItemDialog(QDialog):
         h_btns.addWidget(btn_cancel); h_btns.addWidget(btn_save)
         layout.addLayout(h_btns)
 
-        # Trigger initial state
         self.on_category_change(self.cmb_cat.currentText())
 
     def on_category_change(self, text):
         if text == "Collection":
-            self.lbl_model.setText("Collection Folder (Must contain .obj files):")
+            self.lbl_model.setText("Collection Folder (Structure: Necklace/, Earring/ etc.):")
             self.btn_browse_model.setText("Select Folder")
-            self.txt_model.setPlaceholderText("Select directory containing set items...")
+            self.txt_model.setPlaceholderText("Select directory containing component sub-folders...")
         else:
             self.lbl_model.setText("3D Model (.obj, .glb):")
             self.btn_browse_model.setText("Browse File")
@@ -102,9 +104,19 @@ class AddItemDialog(QDialog):
             if not os.path.isdir(path):
                 QMessageBox.warning(self, "Error", "For Collections, you must select a Directory.")
                 return
-            has_obj = any(f.lower().endswith('.obj') for f in os.listdir(path))
+            
+            # --- Recursive Scan (Deep Search) ---
+            has_obj = False
+            # Walk through root and all subdirectories
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if file.lower().endswith('.obj'):
+                        has_obj = True
+                        break
+                if has_obj: break
+            
             if not has_obj:
-                QMessageBox.warning(self, "Error", "Selected folder contains no .obj files!")
+                QMessageBox.warning(self, "Error", "Selected folder (and subfolders) contains no .obj files!")
                 return
         else:
             if not os.path.isfile(path):
@@ -118,5 +130,6 @@ class AddItemDialog(QDialog):
             "name": self.txt_name.text(),
             "category": self.cmb_cat.currentText(),
             "model_path": self.txt_model.text(),
-            "thumbnail_path": self.txt_thumb.text() if self.txt_thumb.text() else None
+            "thumbnail_path": self.txt_thumb.text() if self.txt_thumb.text() else None,
+            "details": self.txt_details.toPlainText()
         }

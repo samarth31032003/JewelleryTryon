@@ -8,7 +8,6 @@ from ui.styles import get_stylesheet
 class TryOnControls(QWidget):
     """
     The Right-Side Control Panel.
-    Simplified: just standard widgets.
     """
     setting_changed = pyqtSignal(str, float)
     component_changed = pyqtSignal(str)
@@ -19,7 +18,7 @@ class TryOnControls(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(get_stylesheet())
-        self.setFixedWidth(320) # Fixed width when visible
+        self.setFixedWidth(320)
         
         # UI Setup
         self.layout = QVBoxLayout(self)
@@ -61,10 +60,13 @@ class TryOnControls(QWidget):
         btn_layout = QVBoxLayout(btn_box)
         btn_layout.setContentsMargins(0,0,0,0)
         
+        # --- AI TOGGLE BUTTON ---
         self.btn_ai = QPushButton("Enable AI")
         self.btn_ai.setCheckable(True)
         self.btn_ai.setObjectName("PrimaryButton")
-        self.btn_ai.toggled.connect(self.ai_toggled.emit)
+        # Connect to a local slot that updates Text AND emits signal
+        self.btn_ai.toggled.connect(self.on_ai_btn_toggled) 
+        
         btn_layout.addWidget(self.btn_ai)
         
         self.chk_mask = QCheckBox("Show Occlusion (Debug)")
@@ -98,6 +100,14 @@ class TryOnControls(QWidget):
         
         scene_layout.addStretch()
         self.tabs.addTab(self.tab_scene, "Scene")
+
+    def on_ai_btn_toggled(self, checked):
+        """Updates UI Text and emits signal."""
+        if checked:
+            self.btn_ai.setText("AI ACTIVE")
+        else:
+            self.btn_ai.setText("Enable AI")
+        self.ai_toggled.emit(checked)
 
     def rebuild_sliders(self, strategy):
         while self.slider_layout.count():

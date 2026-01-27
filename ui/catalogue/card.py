@@ -5,7 +5,6 @@ from PyQt5.QtWidgets import (QFrame, QVBoxLayout, QLabel, QWidget,
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
 from ui.styles import COLOR_PRIMARY
-
 class JewelryCard(QFrame):
     clicked = pyqtSignal(object)
     delete_clicked = pyqtSignal(int) # Emits ID

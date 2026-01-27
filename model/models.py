@@ -12,3 +12,4 @@ class JewelryItem:
     thumbnail_path: str = None
     # Stores slider values: {'B_Scale': 105, 'B_Rot_X': 90, ...}
     settings: Dict[str, Any] = field(default_factory=dict)
+    details: str = ""

@@ -175,29 +175,66 @@ class TryOnWindow(QWidget):
         return None
 
     def _process_pending_loads(self):
+        """Smart Loader: Handles Collections with Sub-Folders."""
         if not self.pending_item: return
         path = self.pending_item.model_path
+        
         if os.path.isdir(path):
-            print(f"Loading Collection: {path}")
+            print(f"Loading Collection from Directory: {path}")
             found_parts = {}
+            
+            # Helper to guess body part from text
+            def classify_part(name):
+                lower = name.lower()
+                if "neck" in lower: return "neck"
+                if "ear" in lower: return "ear"
+                if "nose" in lower: return "nose"
+                if "tikka" in lower or "fore" in lower: return "forehead"
+                if "bindi" in lower: return "forehead"
+                return None
+
+            # 1. SCAN SUB-DIRECTORIES (Preferred Method)
+            # Looks for folders like "Necklace", "Earrings" inside the collection folder
+            for entry in os.scandir(path):
+                if entry.is_dir():
+                    key = classify_part(entry.name)
+                    if key:
+                        # Find the first .obj inside this subfolder
+                        for sub_f in os.listdir(entry.path):
+                            if sub_f.lower().endswith('.obj'):
+                                full_path = os.path.join(entry.path, sub_f)
+                                found_parts[key] = full_path
+                                # Key allows Renderer to identify which mesh is which
+                                self.viewer.load_object(full_path, key=key)
+                                print(f"  -> Found {key}: {sub_f}")
+                                break # Found one obj for this part, move to next folder
+
+            # 2. SCAN ROOT FILES (Fallback Method)
+            # If you still have loose files in the root, we catch them here
             for fname in os.listdir(path):
                 if fname.lower().endswith('.obj'):
-                    full_path = os.path.join(path, fname)
-                    lower = fname.lower()
-                    key = None
-                    if "neck" in lower: key = "neck"
-                    elif "ear" in lower: key = "ear"
-                    elif "nose" in lower: key = "nose"
-                    elif "tikka" in lower or "fore" in lower: key = "forehead"
-                    if key:
+                    key = classify_part(fname)
+                    # Only add if we didn't already find this part in a folder
+                    if key and key not in found_parts:
+                        full_path = os.path.join(path, fname)
                         found_parts[key] = full_path
                         self.viewer.load_object(full_path, key=key)
+                        print(f"  -> Found {key} (Root): {fname}")
+
+            # 3. Pass to Strategy
             if isinstance(self.ai_worker.strategy, CollectionStrategy):
                 self.ai_worker.strategy.load_components(found_parts)
+                
+                if self.pending_item.settings:
+                    print(f"Restoring Collection Settings: {self.pending_item.settings}")
+                    self.ai_worker.strategy.update_settings(self.pending_item.settings)
                 self.controls.rebuild_sliders(self.ai_worker.strategy)
+        
         else:
+            # Single Item File
             print(f"Loading Single: {path}")
             self.viewer.load_object(path, key='default')
+
         self.pending_item = None
 
     def on_setting_changed(self, key, val): self.ai_worker.update_settings({key: val})
