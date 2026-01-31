@@ -75,7 +75,7 @@ class TryOnControls(QWidget):
 
         self.btn_save = QPushButton("Save Settings")
         self.btn_save.setObjectName("PrimaryButton")
-        self.btn_save.clicked.connect(self.save_requested.emit)
+        self.btn_save.clicked.connect(self.on_save_clicked)
         btn_layout.addWidget(self.btn_save)
         
         item_layout.addWidget(btn_box)
@@ -141,21 +141,60 @@ class TryOnControls(QWidget):
             
             lbl = QLabel(label_text)
             lbl.setMinimumWidth(80)
-            sld = QSlider(Qt.Horizontal)
-            sld.setRange(min_v, max_v)
-            sld.setValue(int(val))
-            sld.valueChanged.connect(lambda v, k=key: self.setting_changed.emit(k, v))
-            
+            sld = self._build_slider(min_v, max_v, int(val), key)
+
+            btn_minus = self._round_button("–", lambda _=False, s=sld: s.setValue(s.value() - 1))
+            btn_plus = self._round_button("+", lambda _=False, s=sld: s.setValue(s.value() + 1))
+
             row.addWidget(lbl)
+            row.addWidget(btn_minus)
             row.addWidget(sld)
+            row.addWidget(btn_plus)
             self.slider_layout.addWidget(container)
 
     def add_slider_row(self, layout, row, key, label, min_v, max_v, def_v):
         """Helper for static scene sliders."""
         l = QLabel(label)
-        s = QSlider(Qt.Horizontal)
-        s.setRange(min_v, max_v)
-        s.setValue(def_v)
-        s.valueChanged.connect(lambda v: self.setting_changed.emit(key, v))
-        layout.addWidget(l, row, 0)
-        layout.addWidget(s, row, 1)
+        s = self._build_slider(min_v, max_v, def_v, key)
+
+        btn_minus = self._round_button("–", lambda _=False, sl=s: sl.setValue(sl.value() - 1))
+        btn_plus = self._round_button("+", lambda _=False, sl=s: sl.setValue(sl.value() + 1))
+
+        h = QHBoxLayout()
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(l)
+        h.addWidget(btn_minus)
+        h.addWidget(s)
+        h.addWidget(btn_plus)
+        layout.addLayout(h, row, 0, 1, 2)
+
+    def _build_slider(self, min_v, max_v, value, key):
+        sld = QSlider(Qt.Horizontal)
+        sld.setRange(min_v, max_v)
+        sld.setValue(value)
+        sld.valueChanged.connect(lambda v, k=key: self.setting_changed.emit(k, v))
+        sld.setStyleSheet(
+            "QSlider::groove:horizontal {"
+            " height: 10px; background: #1f2c42; border-radius: 5px;"
+            "}"
+            "QSlider::handle:horizontal {"
+            " background: #2f7ae5; width: 18px; height: 18px;"
+            " margin: -5px 0; border-radius: 9px; border: 2px solid #0c1624;"
+            "}"
+            "QSlider::sub-page:horizontal { background: #2f7ae5; border-radius: 5px; }"
+        )
+        return sld
+
+    def _round_button(self, text, on_click):
+        btn = QPushButton(text)
+        btn.setFixedSize(32, 32)
+        btn.setStyleSheet(
+            "QPushButton { background-color: #0f1a2b; color: #e8f0ff;"
+            " border: 1px solid #1f2c42; border-radius: 16px; font-weight: 700; }"
+            "QPushButton:hover { background-color: #2f7ae5; color: white; border-color: #2f7ae5; }"
+        )
+        btn.clicked.connect(lambda checked=False: on_click())
+        return btn
+
+    def on_save_clicked(self):
+        self.save_requested.emit()

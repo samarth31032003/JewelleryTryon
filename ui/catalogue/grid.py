@@ -1,5 +1,5 @@
 # ui/catalogue/grid.py
-from PyQt5.QtWidgets import (QWidget, QGridLayout, QScrollArea)
+from PyQt5.QtWidgets import QWidget, QGridLayout
 from PyQt5.QtCore import Qt, pyqtSignal
 from .card import JewelryCard
 
@@ -10,21 +10,10 @@ class JewelryGrid(QWidget):
 
     def __init__(self):
         super().__init__()
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0) # Tight fit inside the scroll area
-        
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("background: transparent; border: none;")
-        
-        self.container = QWidget()
-        self.grid = QGridLayout(self.container)
+        self.grid = QGridLayout(self)
         self.grid.setSpacing(25)
         self.grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.grid.setContentsMargins(20, 20, 20, 20)
-        
-        self.scroll.setWidget(self.container)
-        layout.addWidget(self.scroll)
 
     def refresh(self, items):
         """Rebuilds the grid with the provided list of items."""

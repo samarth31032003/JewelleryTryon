@@ -30,6 +30,7 @@ class TryOnWindow(QWidget):
         self.current_item = None
         self.pending_item = None
         self.use_ai = False
+        self.scene_settings = {"Cam_FOV": 45}
 
         # --- LAYOUT & UI ---
         self.main_layout = QHBoxLayout(self)
@@ -46,30 +47,31 @@ class TryOnWindow(QWidget):
         self.btn_fullscreen = QPushButton("⛶", self.viewer)
         self.btn_fullscreen.setCursor(Qt.PointingHandCursor)
         self.btn_fullscreen.clicked.connect(self.toggle_cinema_mode)
-        self.btn_fullscreen.setFixedSize(40, 40)
+        self.btn_fullscreen.setFixedSize(48, 48)
         self.btn_fullscreen.show()
 
         # B. Back Button (Top-Left) - NEW
         self.btn_back = QPushButton("← Collection", self.viewer)
         self.btn_back.setCursor(Qt.PointingHandCursor)
         self.btn_back.clicked.connect(self.back_clicked.emit) # Emits signal
-        self.btn_back.setFixedSize(140, 40)
+        self.btn_back.setFixedSize(150, 44)
         self.btn_back.show()
 
         # Shared Style for Floating Buttons
         float_style = """
             QPushButton {
-                background-color: rgba(0, 0, 0, 0.4);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 4px;
-                font-weight: bold;
+                background-color: rgba(15, 26, 43, 0.8);
+                color: #e8f0ff;
+                border: 1px solid #1f2c42;
+                border-radius: 14px;
+                font-weight: 700;
                 font-size: 14px;
+                padding: 8px 12px;
             }
             QPushButton:hover {
-                background-color: #D4AF37; 
-                color: black;
-                border: 1px solid #D4AF37;
+                background-color: #2f7ae5;
+                color: white;
+                border: 1px solid #2f7ae5;
             }
         """
         self.btn_fullscreen.setStyleSheet(float_style)
@@ -80,7 +82,7 @@ class TryOnWindow(QWidget):
         self.main_layout.addWidget(self.controls, stretch=0)
 
         # Threads
-        self.cam_worker = CameraWorker(camera_index=0)
+        self.cam_worker = CameraWorker(camera_index=2)
         self.ai_worker = AIWorker()
 
         self.setup_connections()
@@ -122,7 +124,7 @@ class TryOnWindow(QWidget):
     # --- SESSION ---
     def start_session(self):
         if not self.cam_worker.isRunning():
-            self.cam_worker = CameraWorker(0) 
+            self.cam_worker = CameraWorker(2) 
             self.cam_worker.frame_captured.connect(self.on_frame_received)
             self.cam_worker.start()
         if not self.ai_worker.isRunning():
@@ -157,6 +159,14 @@ class TryOnWindow(QWidget):
         if strategy and item.settings:
             if hasattr(strategy, 'update_settings'): strategy.update_settings(item.settings)
             else: strategy.settings.update(item.settings)
+
+        # Restore per-item scene settings (e.g., FOV)
+        if item.settings and isinstance(item.settings, dict):
+            scene_cfg = item.settings.get("Scene", {})
+            if isinstance(scene_cfg, dict):
+                self.scene_settings.update(scene_cfg)
+                if "Cam_FOV" in scene_cfg:
+                    self.viewer.fov = scene_cfg.get("Cam_FOV", self.viewer.fov)
 
         self.ai_worker.set_strategy(strategy)
         self.controls.rebuild_sliders(strategy)
@@ -245,14 +255,26 @@ class TryOnWindow(QWidget):
     def on_ai_toggled(self, enabled): self.use_ai = enabled
     def on_mask_toggled(self, enabled): self.viewer.debug_occluder = enabled
     def update_scene_params(self, key, val):
-        if key == "Cam_FOV": self.viewer.fov = val
-        elif key == "Light_Exp": self.viewer.exposure = val * 0.1
-        elif key == "Light_Gam": self.viewer.gamma = val * 0.1
-        elif key == "Light_Amb": self.viewer.ambient_str = val * 0.01
+        if key == "Cam_FOV":
+            self.viewer.fov = val
+            self.scene_settings["Cam_FOV"] = val
+        elif key == "Light_Exp":
+            self.viewer.exposure = val * 0.1
+        elif key == "Light_Gam":
+            self.viewer.gamma = val * 0.1
+        elif key == "Light_Amb":
+            self.viewer.ambient_str = val * 0.01
         self.viewer.update()
     def save_settings(self):
-        if self.current_item and self.ai_worker.strategy:
-            self.db.update_item_settings(self.current_item.id, self.ai_worker.strategy.settings)
+        if not self.current_item:
+            return
+        merged_settings = {}
+        # Strategy (per-jewelry) settings
+        if self.ai_worker.strategy:
+            merged_settings.update(self.ai_worker.strategy.settings)
+        # Scene-level settings we want to persist per item
+        merged_settings["Scene"] = dict(self.scene_settings)
+        self.db.update_item_settings(self.current_item.id, merged_settings)
 
     def toggle_cinema_mode(self):
         """Toggles Fullscreen and visibility of UI elements."""
