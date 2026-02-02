@@ -7,14 +7,11 @@ from utils.smoothing import OneEuroFilter, RotationFilter
 
 class HandState:
     def __init__(self):
-        # Stronger smoothing to cut jitter
-        self.filter_rvec = RotationFilter(min_cutoff=0.3, beta=0.5)
-        self.filter_tvec = OneEuroFilter(min_cutoff=0.2, beta=0.4)
+        self.filter_rvec = RotationFilter(min_cutoff=0.1, beta=2.0)
+        self.filter_tvec = OneEuroFilter(min_cutoff=0.1, beta=2.0)
         self.last_valid_rvec = None
         self.last_valid_tvec = None
         self.last_seen_time = 0
-        self.stable_rvec = None
-        self.stable_tvec = None
 
 class RingStrategy(TrackingStrategy):
     def __init__(self):
@@ -104,20 +101,9 @@ class RingStrategy(TrackingStrategy):
                     tvec_s = state.filter_tvec.update(tvec.flatten(), now).reshape(3,1)
                     state.last_valid_rvec = rvec_s
                     state.last_valid_tvec = tvec_s
-                    blend = 0.15
-                    if state.stable_rvec is None:
-                        state.stable_rvec = rvec_s
-                    else:
-                        state.stable_rvec = state.stable_rvec * (1 - blend) + rvec_s * blend
-                    if state.stable_tvec is None:
-                        state.stable_tvec = tvec_s
-                    else:
-                        state.stable_tvec = state.stable_tvec * (1 - blend) + tvec_s * blend
                     state.last_seen_time = now
 
                     # --- RING SPECIFIC LOGIC STARTS HERE ---
-                    rvec_b = state.stable_rvec
-                    tvec_b = state.stable_tvec
                     
                     # 1. Determine Which Finger?
                     f_idx = int(self.settings.get("Finger", 3))
@@ -154,7 +140,7 @@ class RingStrategy(TrackingStrategy):
                     pip_2d = self._get_px(hand_lms.landmark[pip_idx], w, h)
                     
                     # Back-project 2D -> 3D using estimated Z
-                    z_est = tvec_b[2][0] # Z distance from camera
+                    z_est = tvec_s[2][0] # Z distance from camera
                     
                     # Unproject
                     p_mcp = self._unproject(mcp_2d, z_est)
@@ -164,8 +150,8 @@ class RingStrategy(TrackingStrategy):
 
                     # Derive palm normal (roll hint) from PnP hand pose so the ring
                     # rotates consistently with the hand's orientation.
-                    R_hand, _ = cv2.Rodrigues(rvec_b)
-                    t_hand = tvec_b.flatten()
+                    R_hand, _ = cv2.Rodrigues(rvec_s)
+                    t_hand = tvec_s.flatten()
                     # Use the same model_3d provided for this hand to get palm basis
                     p_wrist_cam = (R_hand @ model_3d[0]) + t_hand
                     p_index_cam = (R_hand @ model_3d[1]) + t_hand
