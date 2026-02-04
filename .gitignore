@@ -11,3 +11,4 @@ __pycache__
 *.pt
 *.engine
 *.bin
+mesh_viewer_modern.py

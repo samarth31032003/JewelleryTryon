@@ -2,8 +2,10 @@
 import numpy as np
 import cv2
 import time
+import math
 from .base import TrackingStrategy
-from utils.smoothing import OneEuroFilter, RotationFilter
+from utils.smoothing import OneEuroFilter
+from trackers.occluder_shared import OccluderManager
 
 class NeckStrategy(TrackingStrategy):
     def __init__(self):
@@ -12,28 +14,29 @@ class NeckStrategy(TrackingStrategy):
         self.filter_pos = OneEuroFilter(min_cutoff=0.5, beta=0.5)
         
         self.settings = {
-            "Scale": 100,      # Necklace Size
-            "Up_Down": 0,      # Vertical Adjust (Neck vs Chest)
-            "Fwd_Back": 0,     # Z-Offset (Prevent clipping into skin)
+            "Scale": 150,      
+            "Up_Down": 0,      
+            "Fwd_Back": 0,     
             "Rot_X": 0, "Rot_Y": 0, "Rot_Z": 0,
-            
-            # OCCLUDER (The "Bib" Plane)
-            "Occ_Width": 100,  # Width of the masking plane
-            "Occ_Height": 100  # Height of the masking plane
+            # Occluder settings handled by Manager
         }
 
     def get_slider_definitions(self):
-        return [
-            # JEWELRY
-            ("Scale", "Size", 0, 200, 100, 0.01),
-            ("Up_Down", "Height", -100, 100, 0, 0.005),
-            ("Fwd_Back", "Depth", -50, 50, 0, 0.005), # Move away/into chest
-            ("Rot_X", "Tilt X", -180, 180, 0, 1.0),
+        sliders = [
+            # 1. EXPONENTIAL SCALER
+            ("Scale", "Size", 1, 500, 150, 1.0),
             
-            # OCCLUDER (Flattened Cylinder -> Plane)
-            ("Occ_Width", "Mask W", 0, 150, 100, 0.01),
-            ("Occ_Height", "Mask H", 50, 150, 100, 0.01)
+            # 2. POSITION CONTROLS
+            ("Up_Down", "Height", -500, 500, 0, 1.0),
+            ("Fwd_Back", "Depth", -500, 500, 0, 1.0), 
+            
+            # 3. ROTATION
+            ("Rot_X", "Tilt X", -180, 180, 0, 1.0),
+            ("Rot_Y", "Tilt Y", -180, 180, 0, 1.0),
+            ("Rot_Z", "Spin", -180, 180, 0, 1.0),
         ]
+        sliders.extend(OccluderManager.get_shared_sliders())
+        return sliders
 
     def process_frame(self, results, w, h):
         self.update_camera(w, h)
@@ -41,9 +44,8 @@ class NeckStrategy(TrackingStrategy):
         
         if not results.pose_landmarks: return []
 
-        # MediaPipe Pose: 11=Left Shoulder, 12=Right Shoulder
-        lm_l = results.pose_landmarks.landmark[11]
-        lm_r = results.pose_landmarks.landmark[12]
+        lm_l = results.pose_landmarks.landmark[11] # Left Shoulder
+        lm_r = results.pose_landmarks.landmark[12] # Right Shoulder
         
         if lm_l.visibility < 0.5 or lm_r.visibility < 0.5: return []
 
@@ -52,7 +54,6 @@ class NeckStrategy(TrackingStrategy):
         px_r = np.array(self._get_px(lm_r, w, h))
         
         # 2. Estimate Depth (Z)
-        # Avg shoulder width ~ 40cm (0.4m)
         REAL_SHOULDER_WIDTH = 0.40
         px_width = np.linalg.norm(px_l - px_r)
         if px_width < 10: return []
@@ -64,89 +65,80 @@ class NeckStrategy(TrackingStrategy):
         p_l = self._unproject(px_l, z_est)
         p_r = self._unproject(px_r, z_est)
         
-        # Midpoint (The "Neck Base")
         p_center = (p_l + p_r) / 2.0
         p_smooth = self.filter_pos.update(p_center, time.time())
         
         # 4. Construct Rotation Matrix (Chest Plane)
-        # X-Axis: Left to Right Shoulder
         vec_x = p_r - p_l
         vec_x /= np.linalg.norm(vec_x)
         
-        # Y-Axis: Down spine. Cross X with Forward(Z) to get Down-ish
         vec_cam_fwd = np.array([0, 0, 1], dtype=np.float32)
         vec_y = np.cross(vec_cam_fwd, vec_x) 
         vec_y /= np.linalg.norm(vec_y)
         
-        # Z-Axis: Normal out of chest
         vec_z = np.cross(vec_x, vec_y)
         
-        # Build Matrix
         R_chest = np.eye(4, dtype=np.float32)
         R_chest[:3, 0] = vec_x
-        R_chest[:3, 1] = vec_y # Pointing Down
+        R_chest[:3, 1] = vec_y 
         R_chest[:3, 2] = vec_z
 
         # 5. Build Matrices
         
-        # A. Necklace
-        mat_jewel = self._build_matrix(p_smooth, R_chest, is_occluder=False)
+        # A. Necklace (Jewelry)
+        mat_jewel = self._build_matrix(p_smooth, R_chest)
         render_commands.append({'type': 'mesh', 'matrix': mat_jewel})
         
-        # B. Occluder (The Bib)
-        # We push it slightly behind the necklace (-Z) so it doesn't hide the front
-        mat_occ = self._build_matrix(p_smooth, R_chest, is_occluder=True)
-        render_commands.append({'type': 'occluder', 'matrix': mat_occ})
+        # B. Shared Body Occluder
+        mat_occ = OccluderManager.get_body_matrix(self.settings, p_smooth, R_chest)
+        render_commands.append({
+            'type': 'occluder', 
+            'matrix': mat_occ,
+            'file_path': OccluderManager.PATH_BODY
+        })
 
         return render_commands
 
-    def _build_matrix(self, pos, rot_mat, is_occluder):
-        # Base Position
-        T = np.eye(4, dtype=np.float32)
-        T[:3, 3] = pos
+    def _build_matrix(self, pos, rot_mat):
+        T = np.eye(4, dtype=np.float32); T[:3, 3] = pos
         
-        # Offset Logic
-        up_down = self.settings.get("Up_Down", 0) * 0.01
-        fwd_back = self.settings.get("Fwd_Back", 0) * 0.01
+        up_down = self.settings.get("Up_Down", 0) * 0.0001
+        fwd_back = self.settings.get("Fwd_Back", 0) * 0.0001
         
         T_offset = np.eye(4, dtype=np.float32)
-        # Y is Down, so -Y moves Up towards neck
-        # Z is Forward, so +Z moves away from chest
-        if is_occluder:
-             # Occluder sits slightly behind necklace
-             T_offset[1, 3] = up_down 
-             T_offset[2, 3] = fwd_back - 0.02 # 2cm behind
-        else:
-             T_offset[1, 3] = up_down
-             T_offset[2, 3] = fwd_back
+        T_offset[1, 3] = up_down
+        T_offset[2, 3] = fwd_back
 
-        # Scale Logic
-        if is_occluder:
-            # Flatten the cylinder to make a Plane ("The Bib")
-            w = self.settings.get("Occ_Width", 100) * 0.002
-            h = self.settings.get("Occ_Height", 100) * 0.002
-            d = 0.01 # Very thin Z (The Plane effect)
-            S = np.diag([w, h, d, 1.0])
-        else:
-            s = self.settings.get("Scale", 100) * 0.01
-            S = np.diag([s, s, s, 1.0])
-
-        # Rotation Logic
-        rx = np.radians(self.settings.get("Rot_X", 0))
-        # Necklace usually needs -90 X rotation because models come lying flat
-        # But we start with 0 for now
+        # --- ROTATION FIX ---
+        # We use the "Gravity Slope" method (Method A)
+        # Rot X = -125 (Leans back against chest)
+        # Rot Z = 180  (Flips "Inside Out" model to face forward)
+        base_x = -125
+        base_y = 0
+        base_z = 180
         
-        import math
-        c, s = math.cos(rx), math.sin(rx)
-        M_rot = np.eye(4, dtype=np.float32)
-        M_rot[:3,:3] = [[1,0,0],[0,c,-s],[0,s,c]]
+        rx = np.radians(base_x + self.settings.get("Rot_X", 0))
+        ry = np.radians(base_y + self.settings.get("Rot_Y", 0))
+        rz = np.radians(base_z + self.settings.get("Rot_Z", 0))
+        
+        def make_rot(a, ax):
+            c, s = math.cos(a), math.sin(a)
+            M = np.eye(4, dtype=np.float32); 
+            if ax==0: M[:3,:3] = [[1,0,0],[0,c,-s],[0,s,c]]
+            elif ax==1: M[:3,:3] = [[c,0,s],[0,1,0],[-s,0,c]]
+            else: M[:3,:3] = [[c,-s,0],[s,c,0],[0,0,1]]
+            return M
+        
+        M_rot = make_rot(rx,0) @ make_rot(ry,1) @ make_rot(rz,2)
+
+        # Scale
+        raw_scale = self.settings.get("Scale", 150)
+        s = 0.00001 * (raw_scale ** 2.0)
+        S = np.diag([s, s, s, 1.0])
 
         cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
         
-        if is_occluder:
-            return cv_to_gl @ T @ rot_mat @ T_offset @ S
-        else:
-            return cv_to_gl @ T @ rot_mat @ T_offset @ M_rot @ S
+        return cv_to_gl @ T @ rot_mat @ T_offset @ M_rot @ S
 
     def _get_px(self, lm, w, h): return [int(lm.x * w), int(lm.y * h)]
 
