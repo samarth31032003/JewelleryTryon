@@ -4,10 +4,8 @@ import json
 import os
 import hashlib
 import secrets
-from utils.paths import DATA_DIR
+from utils.paths import DB_PATH, resolve_path
 from model.models import JewelryItem
-
-DB_PATH = DATA_DIR / "jewelry.db"
 
 class JewelryDB:
     def __init__(self):
@@ -17,8 +15,8 @@ class JewelryDB:
 
     def _init_db(self):
         """Creates tables and handles schema updates."""
-        os.makedirs(DATA_DIR, exist_ok=True)
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        # We cast to str(DB_PATH) to be safe for all sqlite versions
+        self.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         cursor = self.conn.cursor()
         
         # 1. Base Table
@@ -31,7 +29,7 @@ class JewelryDB:
                 texture_path TEXT,
                 thumbnail_path TEXT,
                 settings TEXT,
-                details TEXT  -- New Column
+                details TEXT
             )
         ''')
         
@@ -44,7 +42,7 @@ class JewelryDB:
             )
         """)
         
-        # 3. MIGRATION: Check if 'details' column exists (for existing DBs)
+        # 3. MIGRATION
         cursor.execute("PRAGMA table_info(jewelry)")
         columns = [info[1] for info in cursor.fetchall()]
         if "details" not in columns:
@@ -108,17 +106,21 @@ class JewelryDB:
         
         items = []
         for row in rows:
-            # Row mapping depends on schema order. 
-            # safe fetch via column names is better, but index works if schema is stable.
-            # 0:id, 1:name, 2:cat, 3:model, 4:tex, 5:thumb, 6:settings, 7:details
             settings = json.loads(row[6]) if row[6] else {}
-            # Handle old rows where details might be None
             details_text = row[7] if len(row) > 7 and row[7] else ""
+            
+            # --- PATH RESOLUTION FIX ---
+            # Convert relative DB path to Absolute System Path for the App
+            abs_model_path = resolve_path(row[3])
+            abs_tex_path = resolve_path(row[4]) if row[4] else ""
+            abs_thumb_path = resolve_path(row[5]) if row[5] else ""
             
             item = JewelryItem(
                 id=row[0], name=row[1], category=row[2], 
-                model_path=row[3], texture_path=row[4], 
-                thumbnail_path=row[5], settings=settings,
+                model_path=abs_model_path,    
+                texture_path=abs_tex_path,    
+                thumbnail_path=abs_thumb_path,
+                settings=settings,
                 details=details_text
             )
             items.append(item)

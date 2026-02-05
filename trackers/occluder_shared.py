@@ -1,5 +1,6 @@
 # trackers/occluder_shared.py
 import numpy as np
+from utils.paths import OCCLUDER_HEAD_PATH, OCCLUDER_BODY_PATH
 
 class OccluderManager:
     """
@@ -8,8 +9,8 @@ class OccluderManager:
     """
     
     # PATHS (You must place these .obj files in your data folder)
-    PATH_HEAD = "data/assets/occluder_head.obj"
-    PATH_BODY = "data/assets/occluder_body.obj"
+    PATH_HEAD = OCCLUDER_HEAD_PATH
+    PATH_BODY = OCCLUDER_BODY_PATH
 
     @staticmethod
     def get_shared_sliders():
