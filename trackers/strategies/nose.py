@@ -29,7 +29,7 @@ class NoseStrategy(TrackingStrategy):
             ("Rot_Z", "Spin", -180, 180, 0, 1.0),
         ]
         # Append Shared Occluder Sliders
-        sliders.extend(OccluderManager.get_shared_sliders())
+        sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -101,7 +101,8 @@ class NoseStrategy(TrackingStrategy):
         cmds.append({
             'type': 'occluder', 
             'matrix': mat_occ,
-            'file_path': OccluderManager.PATH_HEAD
+            'file_path': OccluderManager.PATH_HEAD,
+            'mesh_key': 'occ_head'
         })
 
         return cmds

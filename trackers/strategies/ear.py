@@ -19,7 +19,6 @@ class EarringStrategy(TrackingStrategy):
             "Side": 0,         
             "Fwd_Back": 0,     
             "Rot_X": 0, "Rot_Y": 0, "Rot_Z": 0,
-            # Occluder settings are now injected automatically
         }
 
     def get_slider_definitions(self):
@@ -39,7 +38,8 @@ class EarringStrategy(TrackingStrategy):
         ]
         
         # 4. SHARED OCCLUDER SLIDERS
-        sliders.extend(OccluderManager.get_shared_sliders())
+        # MUST BE HEAD SLIDERS
+        sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -86,15 +86,14 @@ class EarringStrategy(TrackingStrategy):
         
         # --- 3. SHARED OCCLUDER ---
         # Calculate Head Center (Midpoint of cheeks)
-        p_head_center = (p_left + p_right) / 2.0
-        
+        p_head_center = (p_left + p_right) / 2.0      
         mat_occ = OccluderManager.get_head_matrix(self.settings, p_head_center, R_head)
         cmds.append({
             'type': 'occluder', 
             'matrix': mat_occ,
-            'file_path': OccluderManager.PATH_HEAD
+            'file_path': OccluderManager.PATH_HEAD,
+            'mesh_key': 'occ_head'
         })
-
         return cmds
 
     def _build_matrix(self, pos, rot_mat, is_left):

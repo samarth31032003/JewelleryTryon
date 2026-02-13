@@ -4,13 +4,18 @@ from .neck import NeckStrategy
 from .ear import EarringStrategy
 from .nose import NoseStrategy
 from .forehead import ForeheadStrategy
+from trackers.occluder_shared import OccluderManager
 
 class CollectionStrategy(TrackingStrategy):
     def __init__(self):
         super().__init__()
-        self.sub_strategies = {} # {'neck': NeckStrategy(), ...}
-        self.settings = {}       # {'neck': {Scale:100}, ...}
-        self.active_component = None # 'neck' (Key for UI slider Focus)
+        self.sub_strategies = {} 
+        self.active_component = None 
+
+        # Define which keys are shared across all "Head" strategies
+        self.SHARED_HEAD_KEYS = {"Occ_Head_Scale", "Occ_Head_X", "Occ_Head_Y", "Occ_Head_Z"}
+        # Define which strategies share the head
+        self.HEAD_STRAT_NAMES = ["ear", "nose", "forehead"]
 
     def load_components(self, parts_dict):
         """
@@ -18,11 +23,11 @@ class CollectionStrategy(TrackingStrategy):
         parts_dict = {'neck': 'path/to/obj', 'ear': 'path/to/obj'}
         """
         self.sub_strategies = {}
-        self.settings = {}
         
-        # Factory Logic
+        # 1. Initialize Sub-Strategies based on files found
         for key, path in parts_dict.items():
             strat = None
+            # Determine type based on folder/filename
             if "neck" in key: strat = NeckStrategy()
             elif "ear" in key: strat = EarringStrategy()
             elif "nose" in key: strat = NoseStrategy()
@@ -30,34 +35,47 @@ class CollectionStrategy(TrackingStrategy):
             
             if strat:
                 self.sub_strategies[key] = strat
-                # Initialize settings from default
-                self.settings[key] = strat.settings.copy()
 
         # Default Focus
         if self.sub_strategies:
             self.active_component = list(self.sub_strategies.keys())[0]
 
+
     def update_settings(self, new_settings):
-        """Updates settings. Handles both full-restore and single-slider updates."""
-        # 1. Check if this is a Full Restore (e.g. from DB load)
-        # It's a full restore if the keys match our component names (neck, ear)
+        """
+        Smart Update: If a shared Head setting is changed, broadcast it to ALL head strategies.
+        """
+        # Case A: Full Restore (Loading from Database)
         is_restore = any(k in self.sub_strategies for k in new_settings.keys())
-        
         if is_restore:
             for key, val in new_settings.items():
                 if key in self.sub_strategies:
-                    self.settings[key] = val
                     self.sub_strategies[key].settings = val
         
-        # 2. Otherwise, it's a Slider Update for the Active Component
+        # Case B: Slider Update (Live UI)
         elif self.active_component:
-            # Update Master Record
-            self.settings[self.active_component].update(new_settings)
-            # Update Child Strategy
-            self.sub_strategies[self.active_component].update_settings(new_settings)
+            # 1. Update the Active Component normally
+            self.sub_strategies[self.active_component].settings.update(new_settings)
+
+            # 2. CHECK FOR SHARED HEAD KEYS
+            # If the user moved a slider like "Occ_Head_Scale"...
+            if any(k in self.SHARED_HEAD_KEYS for k in new_settings.keys()):
+                
+                # Extract only the shared settings
+                shared_update = {k: v for k, v in new_settings.items() if k in self.SHARED_HEAD_KEYS}
+                
+                # Broadcast to other head strategies (Ear, Nose, Forehead)
+                for name in self.HEAD_STRAT_NAMES:
+                    # ensure strategy exists
+                    if name != self.active_component and name in self.sub_strategies:
+                        self.sub_strategies[name].settings.update(shared_update)
+                        # print(f"[Collection] Synced {shared_update} to {name}")
 
     def get_slider_definitions(self):
-        """Delegates slider definition to the Active Component."""
+        """
+        Only show sliders for the CURRENTLY SELECTED component.
+        This fixes the 'Dropdown doesn't work' issue.
+        """
         if self.active_component and self.active_component in self.sub_strategies:
             return self.sub_strategies[self.active_component].get_slider_definitions()
         return []
@@ -73,21 +91,34 @@ class CollectionStrategy(TrackingStrategy):
 
     def process_frame(self, results, w, h):
         self.update_camera(w, h)
-        all_commands = []
         
+        raw_commands = []
+        
+        # 1. Run All Active Sub-Strategies
         for key, strategy in self.sub_strategies.items():
-            # Pass camera info to children
             strategy.camera_matrix = self.camera_matrix
             strategy.dist_coeffs = self.dist_coeffs
             
-            # Get commands
             cmds = strategy.process_frame(results, w, h)
             
-            # Tag commands with the model_key so Renderer uses correct mesh
             for cmd in cmds:
                 if cmd['type'] == 'mesh':
                     cmd['model_key'] = key 
             
-            all_commands.extend(cmds)
+            raw_commands.extend(cmds)
+
+        # 2. DEDUPLICATE OCCLUDERS
+        final_cmds = []
+        seen_occluders = set()
+        
+        for cmd in raw_commands:
+            if cmd['type'] == 'occluder':
+                occ_key = cmd.get('mesh_key') 
+                
+                if occ_key and occ_key not in seen_occluders:
+                    seen_occluders.add(occ_key)
+                    final_cmds.append(cmd)
+            else:
+                final_cmds.append(cmd)
             
-        return all_commands
+        return final_cmds

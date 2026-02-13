@@ -39,8 +39,8 @@ THUMBNAILS_DIR.mkdir(exist_ok=True)
 # These must match your 'data/assets' structure in dev
 ASSETS_DIR = APP_ROOT / "data" / "assets"
 
-OCCLUDER_HEAD_PATH = ASSETS_DIR / "occluder_head.obj"
-OCCLUDER_BODY_PATH = ASSETS_DIR / "occluder_body.obj"
+OCCLUDER_HEAD_PATH = ASSETS_DIR / "head" / "occluder_head.obj"
+OCCLUDER_BODY_PATH = ASSETS_DIR / "body" / "occluder_body.obj"
 ICON_PATH = ASSETS_DIR / "icon.png"
 
 # --- 4. HELPER ---

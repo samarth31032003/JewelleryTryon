@@ -37,7 +37,7 @@ class ForeheadStrategy(TrackingStrategy):
         ]
         
         # 4. SHARED OCCLUDER SLIDERS
-        sliders.extend(OccluderManager.get_shared_sliders())
+        sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -99,7 +99,8 @@ class ForeheadStrategy(TrackingStrategy):
         cmds.append({
             'type': 'occluder', 
             'matrix': mat_occ,
-            'file_path': OccluderManager.PATH_HEAD
+            'file_path': OccluderManager.PATH_HEAD,
+            'mesh_key': 'occ_head'
         })
         
         return cmds

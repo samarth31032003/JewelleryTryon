@@ -167,7 +167,7 @@ class TryOnWindow(QWidget):
             if cmd['type'] == 'mesh':
                 self.viewer.render_instances.append(cmd)
             elif cmd['type'] == 'occluder':
-                self.viewer.occluder_instances.append(cmd['matrix'])
+                self.viewer.occluder_instances.append(cmd)
         
         self.viewer.update()
 

@@ -8,13 +8,14 @@ from PyQt5.QtWidgets import QOpenGLWidget
 
 from graphics.shaders import *
 from utils.mesh_loader import load_mesh_data
+from utils.paths import OCCLUDER_HEAD_PATH, OCCLUDER_BODY_PATH
 
 class ARViewerWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # --- STORAGE UPGRADE: Dictionary for Collections ---
-        self.meshes = {} # Format: {'neck': {'vao': int, 'tex': int, 'count': int}, ...}
+        self.meshes = {} 
+        self.occluder_meshes = {} 
         
         # State Flags
         self.camera_ready = False
@@ -33,8 +34,8 @@ class ARViewerWidget(QOpenGLWidget):
         self.idx_count_cylinder = 0
         
         # Render Lists
-        self.render_instances = []   # List of {'matrix': mat4, 'model_key': 'neck'}
-        self.occluder_instances = [] # List of matrices
+        self.render_instances = []   
+        self.occluder_instances = [] 
         
         # Scene Settings
         self.fov = 40.0
@@ -91,11 +92,17 @@ class ARViewerWidget(QOpenGLWidget):
         self._init_bg_quad()
         self._init_debug_layer() 
         self.init_occluder_primitive()
+        
+        # --- 2. AUTO-LOAD OCCLUDERS (Context is guaranteed valid here) ---
+        print("[Renderer] Initializing Occluders...")
+        self.load_occluder(str(OCCLUDER_HEAD_PATH), "occ_head")
+        self.load_occluder(str(OCCLUDER_BODY_PATH), "occ_body")
 
     # --- MEMORY MANAGEMENT ---
     def clear_scene(self):
-        """Frees GPU memory for all loaded meshes."""
+        """Frees GPU memory for JEWELRY ONLY. Keeps Occluders."""
         self.makeCurrent()
+        # Only delete Jewelry Meshes
         for key, mesh_data in self.meshes.items():
             if mesh_data['tex']: glDeleteTextures([mesh_data['tex']])
             if mesh_data['vao']: glDeleteVertexArrays(1, [mesh_data['vao']])
@@ -219,25 +226,55 @@ class ARViewerWidget(QOpenGLWidget):
         if self.show_grid:
             self._draw_grid()
 
-        # 3. Draw Occluders (Procedural)
-        if self.cylinder_ready and self.occluder_instances:
+        # 3. Draw Occluders (Meshes or Procedural)
+        if self.occluder_instances:
             glUseProgram(self.prog_occ)
             glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_proj"), 1, GL_TRUE, self.proj)
             glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_view"), 1, GL_TRUE, self.view)
-            
+
             if self.debug_occluder:
+                # RED color for debug
                 glUniform4f(glGetUniformLocation(self.prog_occ, "u_color"), 1.0, 0.0, 0.0, 0.5)
             else:
+                # Invisible mask
                 glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE)
+
+            mesh_instances = []
+            cyl_instances = []  # cylinders are for wrist , ring, waist .
+            for inst in self.occluder_instances:
+                if isinstance(inst, dict) and inst.get('mesh_key'):
+                    mesh_instances.append(inst)
+                else:
+                    cyl_instances.append(inst if not isinstance(inst, dict) else inst.get('matrix'))
+
+            # Draw Meshes
+            for inst in mesh_instances:
+                key = inst.get('mesh_key')
+                mesh_data = self.occluder_meshes.get(key)
                 
-            glBindVertexArray(self.vao_cylinder)
-            for instance_mat in self.occluder_instances:
-                glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, instance_mat)
-                glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
+                # --- DEBUG PRINT (Remove later) ---
+                if not mesh_data:
+                    print(f"[Render] Warning: Request to draw {key} but mesh not loaded!") 
+                    continue
+                glBindVertexArray(mesh_data['vao'])
+                glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, inst['matrix'])
+                glDrawElements(GL_TRIANGLES, mesh_data['count'], GL_UNSIGNED_INT, None)
 
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
+            # why removing procedural occluders?
+            # # B. Procedural cylinder occluders (legacy)
+            # if self.cylinder_ready and cyl_instances:
+            #     glBindVertexArray(self.vao_cylinder)
+            #     for instance_mat in cyl_instances:
+            #         if instance_mat is None:
+            #             continue
+            #         glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, instance_mat)
+            #         glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
 
-        # 4. Draw Jewelry Meshes
+            # Restore Color Mask if it was disabled
+            if not self.debug_occluder:
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
+
+        # 4. Draw Jewelry 
         if self.meshes and self.render_instances:
             glUseProgram(self.prog_mesh)
             glUniformMatrix4fv(self.loc_m_proj, 1, GL_TRUE, self.proj)
@@ -307,7 +344,45 @@ class ARViewerWidget(QOpenGLWidget):
             'tex': tex_id,
             'count': len(data.faces)
         }
+
+        self.doneCurrent()
+        self.update()
+
+    def load_occluder(self, path, key):
+        """Loads an occluder mesh and stores it separately."""
+        print(f"[Renderer] Attempting to load occluder: {key} from {path}")
         
+        if key in self.occluder_meshes:
+            print(f"[Renderer] Occluder {key} already loaded.")
+            return
+
+        # 1. Load Data
+        data = load_mesh_data(path, is_occluder=True)
+        if not data:
+            print(f"[Renderer] ❌ FAILED to load occluder: {path}")
+            return # <--- This is where it likely fails right now
+
+        print(f"[Renderer] ✔ Loaded {key}: {len(data.faces)} faces.")
+
+        self.makeCurrent()
+        interleaved = np.hstack((data.vertices, data.norms, data.uvs)).astype(np.float32)
+
+        vao = glGenVertexArrays(1); glBindVertexArray(vao)
+        vbo = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo)
+        glBufferData(GL_ARRAY_BUFFER, interleaved.nbytes, interleaved, GL_STATIC_DRAW)
+        ebo = glGenBuffers(1); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.faces.nbytes, data.faces, GL_STATIC_DRAW)
+
+        stride = 32
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
+        glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(12))
+        glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(24))
+
+        self.occluder_meshes[key] = {
+            'vao': vao,
+            'count': len(data.faces)
+        }
+
         self.doneCurrent()
         self.update()
 
