@@ -24,67 +24,51 @@ class AddItemDialog(QDialog):
         # Name
         layout.addWidget(QLabel("Item Name:"))
         self.txt_name = QLineEdit()
-        self.txt_name.setPlaceholderText("e.g. Gold Bridal Set")
         layout.addWidget(self.txt_name)
         
         # Category
-        layout.addWidget(QLabel("Category (Tracking Type):"))
+        layout.addWidget(QLabel("Category:"))
         self.cmb_cat = QComboBox()
         self.cmb_cat.addItems(SUPPORTED_CATEGORIES)
-        self.cmb_cat.currentTextChanged.connect(self.on_category_change) 
         layout.addWidget(self.cmb_cat)
         
-        # Model Path
-        self.lbl_model = QLabel("3D Model (.obj, .glb):") 
+        # Path Selection (ALWAYS FOLDER)
+        self.lbl_model = QLabel("Select Folder (Contains .obj + textures):") 
         layout.addWidget(self.lbl_model)
+        
         h_model = QHBoxLayout()
         self.txt_model = QLineEdit(); self.txt_model.setReadOnly(True)
-        self.btn_browse_model = QPushButton("Browse") 
-        self.btn_browse_model.clicked.connect(self.browse_model)
+        self.btn_browse_model = QPushButton("Select Folder") 
+        self.btn_browse_model.clicked.connect(self.browse_folder) # Changed handler
         h_model.addWidget(self.txt_model); h_model.addWidget(self.btn_browse_model)
         layout.addLayout(h_model)
         
-        # Thumbnail Path
+        # Thumbnail
         layout.addWidget(QLabel("Thumbnail Image (Optional):"))
         h_thumb = QHBoxLayout()
         self.txt_thumb = QLineEdit(); self.txt_thumb.setReadOnly(True)
-        btn_thumb = QPushButton("Browse"); btn_thumb.clicked.connect(self.browse_thumb)
+        btn_thumb = QPushButton("Browse Image"); btn_thumb.clicked.connect(self.browse_thumb)
         h_thumb.addWidget(self.txt_thumb); h_thumb.addWidget(btn_thumb)
         layout.addLayout(h_thumb)
 
-        # Details / Summary
-        layout.addWidget(QLabel("Item Details / Summary:"))
+        # Details
+        layout.addWidget(QLabel("Details:"))
         self.txt_details = QTextEdit()
         self.txt_details.setPlaceholderText("Enter details like gold purity, weight, price, or collection info...")
-        self.txt_details.setMaximumHeight(100)
+        self.txt_details.setMaximumHeight(80)
         layout.addWidget(self.txt_details)
         
         # Buttons
         h_btns = QHBoxLayout()
         btn_cancel = QPushButton("Cancel"); btn_cancel.clicked.connect(self.reject)
-        btn_save = QPushButton("Save to Catalogue"); btn_save.setObjectName("PrimaryButton")
+        btn_save = QPushButton("Save"); btn_save.setObjectName("PrimaryButton")
         btn_save.clicked.connect(self.validate_and_accept)
         h_btns.addWidget(btn_cancel); h_btns.addWidget(btn_save)
         layout.addLayout(h_btns)
 
-        self.on_category_change(self.cmb_cat.currentText())
-
-    def on_category_change(self, text):
-        if text == "Collection":
-            self.lbl_model.setText("Collection Folder (Structure: Necklace/, Earring/ etc.):")
-            self.btn_browse_model.setText("Select Folder")
-            self.txt_model.setPlaceholderText("Select directory containing component sub-folders...")
-        else:
-            self.lbl_model.setText("3D Model (.obj, .glb):")
-            self.btn_browse_model.setText("Browse File")
-            self.txt_model.setPlaceholderText("Select a single 3D model file...")
-
-    def browse_model(self):
-        cat = self.cmb_cat.currentText()
-        if cat == "Collection":
-            f = QFileDialog.getExistingDirectory(self, "Select Collection Folder")
-        else:
-            f, _ = QFileDialog.getOpenFileName(self, "Select 3D Model", "", "3D Files (*.obj *.glb *.gltf)")
+    def browse_folder(self):
+        # ALWAYS ask for a directory
+        f = QFileDialog.getExistingDirectory(self, "Select Folder containing OBJ and Textures")
         if f: self.txt_model.setText(f)
 
     def browse_thumb(self):
@@ -94,34 +78,27 @@ class AddItemDialog(QDialog):
     def validate_and_accept(self):
         name = self.txt_name.text()
         path = self.txt_model.text()
-        cat = self.cmb_cat.currentText()
 
         if not name or not path:
-            QMessageBox.warning(self, "Missing Data", "Name and Path are required.")
+            QMessageBox.warning(self, "Error", "Name and Path required.")
+            return
+            
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "Error", "Please select a Folder.")
             return
 
-        if cat == "Collection":
-            if not os.path.isdir(path):
-                QMessageBox.warning(self, "Error", "For Collections, you must select a Directory.")
-                return
+        # RECURSIVE CHECK
+        has_obj = False
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                if f.lower().endswith('.obj'):
+                    has_obj = True
+                    break
+            if has_obj: break
             
-            # --- Recursive Scan (Deep Search) ---
-            has_obj = False
-            # Walk through root and all subdirectories
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    if file.lower().endswith('.obj'):
-                        has_obj = True
-                        break
-                if has_obj: break
-            
-            if not has_obj:
-                QMessageBox.warning(self, "Error", "Selected folder (and subfolders) contains no .obj files!")
-                return
-        else:
-            if not os.path.isfile(path):
-                QMessageBox.warning(self, "Error", "File not found.")
-                return
+        if not has_obj:
+            QMessageBox.warning(self, "Error", "No .obj files found in this folder (or subfolders)!")
+            return
 
         self.accept()
         
@@ -129,7 +106,7 @@ class AddItemDialog(QDialog):
         return {
             "name": self.txt_name.text(),
             "category": self.cmb_cat.currentText(),
-            "model_path": self.txt_model.text(),
+            "model_path": self.txt_model.text(), # the SOURCE FOLDER path
             "thumbnail_path": self.txt_thumb.text() if self.txt_thumb.text() else None,
             "details": self.txt_details.toPlainText()
         }

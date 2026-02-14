@@ -11,83 +11,87 @@ class LibraryManager:
     """
 
     @staticmethod
-    def import_file(source_path, target_folder_type="model"):
+    def import_asset_folder(source_path):
         """
-        Copies a file to the library and returns the RELATIVE path for the DB.
-        target_folder_type: 'model' or 'thumbnail'
-        """
-        source = Path(source_path)
-        if not source.exists():
-            raise FileNotFoundError(f"Source file not found: {source}")
-
-        # Determine Target Directory
-        if target_folder_type == "model":
-            dest_dir = MODELS_DIR
-        else:
-            dest_dir = THUMBNAILS_DIR
-
-        # Generate a safe unique name to prevent overwrites (e.g., ring_uuid.obj)
-        # We keep the original extension
-        clean_name = f"{source.stem}_{uuid.uuid4().hex[:8]}{source.suffix}"
-        destination = dest_dir / clean_name
-
-        try:
-            shutil.copy2(source, destination)
-            # Return relative path string (e.g., "models/ring_a1b2.obj")
-            # We use forward slashes for cross-platform DB compatibility
-            rel_path = f"{target_folder_type}s/{clean_name}"
-            return rel_path
-        except Exception as e:
-            print(f"Error importing file: {e}")
-            return None
-
-    @staticmethod
-    def import_collection(source_path):
-        """
-        Copies an entire folder (Collection) to the library.
-        Returns relative path: 'models/CollectionName_uuid'
+        Copies an entire folder to the library.
+        Returns TUPLE: (relative_folder_path, relative_obj_path)
         """
         source = Path(source_path)
         if not source.exists() or not source.is_dir():
-            print(f"Error: Source collection not found: {source}")
-            return None
+            print(f"Error: Source is not a directory: {source}")
+            return None, None
 
-        # Create unique folder name
-        folder_name = f"{source.name}_{uuid.uuid4().hex[:8]}"
-        destination = MODELS_DIR / folder_name
-
+        # 1. Generate Unique Folder Name
+        # e.g. "WeddingSet" -> "WeddingSet_a1b2c3"
+        safe_name = "".join([c for c in source.name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        folder_name = f"{safe_name}_{uuid.uuid4().hex[:8]}"
+        dest_dir = MODELS_DIR / folder_name
+        
         try:
-            # Copy the entire directory tree
-            shutil.copytree(source, destination)
-            return f"models/{folder_name}"
+            # 2. Copy Everything (OBJ, MTL, JPG, Subfolders)
+            shutil.copytree(source, dest_dir)
+            
+            # 3. Find the 'Primary' OBJ for Single Items
+            # (For collections, this might just be the first one found, which is fine)
+            found_obj = None
+            # Recursive search for ANY .obj file
+            for root, dirs, files in os.walk(dest_dir):
+                for f in files:
+                    if f.lower().endswith(".obj"):
+                        found_obj = Path(root) / f
+                        break
+                if found_obj: break
+
+            rel_folder = f"models/{folder_name}"
+            rel_obj = None
+            
+            if found_obj:
+                # Calculate path relative to USER_DATA_ROOT
+                # e.g. "models/WeddingSet_a1b2c3/neck/necklace.obj"
+                try:
+                    rel_obj = str(found_obj.relative_to(USER_DATA_ROOT)).replace("\\", "/")
+                except ValueError:
+                    # Fallback if path manipulation fails
+                    rel_obj = f"{rel_folder}/{found_obj.name}"
+            
+            return rel_folder, rel_obj
+
         except Exception as e:
-            print(f"Error importing collection: {e}")
+            print(f"Error importing asset folder: {e}")
+            return None, None
+
+    @staticmethod
+    def import_thumbnail(source_path):
+        """Simple copy for single image files."""
+        source = Path(source_path)
+        if not source.exists(): return None
+        
+        clean_name = f"{source.stem}_{uuid.uuid4().hex[:8]}{source.suffix}"
+        dest = THUMBNAILS_DIR / clean_name
+        try:
+            shutil.copy2(source, dest)
+            return f"thumbnails/{clean_name}"
+        except Exception:
             return None
 
     @staticmethod
-    def delete_file(file_path):
-        """
-        Safely deletes a file/folder if it exists inside the User Data Root.
-        Accepts absolute paths (e.g. C:/.../models/file.obj).
-        """
-        if not file_path: return
+    def delete_item(model_path_from_db):
+        """Safely deletes the item's folder."""
+        if not model_path_from_db: return
         
-        target = Path(file_path).resolve()
-        library_root = USER_DATA_ROOT.resolve()
-
-        # SECURITY CHECK:
-        # Ensure the target path is actually inside our 'library' folder.
-        # This prevents deleting system files if a bad path is passed.
-        if library_root not in target.parents:
-            print(f"Security Block: Attempted to delete external file: {target}")
+        full_path = USER_DATA_ROOT / model_path_from_db
+        
+        # If DB path is a file (Single Item), delete its parent folder
+        if full_path.is_file():
+            folder_to_delete = full_path.parent
+        # If DB path is a folder (Collection), delete it directly
+        else:
+            folder_to_delete = full_path
+            
+        # Security: Ensure we are inside 'data/models'
+        if MODELS_DIR.resolve() not in folder_to_delete.resolve().parents and MODELS_DIR.resolve() != folder_to_delete.resolve():
+            print("Security Block: Attempted to delete external path.")
             return
 
-        try:
-            if target.exists():
-                if target.is_dir():
-                    shutil.rmtree(target) # Delete folder (Collections)
-                else:
-                    os.remove(target)     # Delete file (Single items)
-                print(f"Deleted library item: {target.name}")
-        except Exception as e:
-            print(f"Error deleting {target}: {e}")
+        if folder_to_delete.exists():
+            shutil.rmtree(folder_to_delete, ignore_errors=True)

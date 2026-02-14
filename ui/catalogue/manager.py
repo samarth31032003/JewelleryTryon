@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QMessageBox, QScrollArea, QFrame, QLineEdit)
 from PyQt5.QtCore import pyqtSignal, Qt
 from ui.styles import get_stylesheet
+import os
+from pathlib import Path
 
 from .grid import JewelryGrid
 from .dialog import AddItemDialog, SUPPORTED_CATEGORIES
@@ -177,33 +179,40 @@ class CatalogueWidget(QWidget):
             data = dlg.get_data()
             
             # --- 1. MANAGED LIBRARY IMPORT ---
-            # Instead of saving the raw path (e.g., C:/Users/...), we copy to library first
-            
-            model_src = data['model_path']
-            thumb_src = data['thumbnail_path']
+            src_folder = data['model_path']
             cat = data['category']
             
-            # A. Import Model (File or Folder)
-            if cat == "Collection":
-                rel_model_path = LibraryManager.import_collection(model_src)
-            else:
-                rel_model_path = LibraryManager.import_file(model_src, "model")
+            # 1. IMPORT FOLDER
+            # Returns: ("models/Set_123", "models/Set_123/ring.obj")
+            rel_folder, rel_obj = LibraryManager.import_asset_folder(src_folder)
             
-            if not rel_model_path:
-                QMessageBox.critical(self, "Import Error", "Failed to copy model to library.")
+            if not rel_folder:
+                QMessageBox.critical(self, "Error", "Failed to import folder.")
                 return
 
-            # B. Import Thumbnail (Optional)
-            rel_thumb_path = None
-            if thumb_src:
-                rel_thumb_path = LibraryManager.import_file(thumb_src, "thumbnail")
+            # 2. DECIDE PATH TO SAVE
+            if cat == "Collection":
+                # For Collections, window.py needs the FOLDER to scan it.
+                final_model_path = rel_folder
+            else:
+                # For Single Items, window.py expects a direct OBJ file.
+                if not rel_obj:
+                    QMessageBox.warning(self, "Warning", "No .obj file found in folder! Saving folder path instead.")
+                    final_model_path = rel_folder
+                else:
+                    final_model_path = rel_obj
 
-            # --- 2. SAVE RELATIVE PATHS TO DB ---
+            # 3. THUMBNAIL
+            rel_thumb = None
+            if data['thumbnail_path']:
+                rel_thumb = LibraryManager.import_thumbnail(data['thumbnail_path'])
+
+            # 4. SAVE TO DB
             self.db.add_item(
                 name=data['name'],
                 category=cat,
-                model_path=rel_model_path,
-                thumbnail_path=rel_thumb_path,
+                model_path=final_model_path,
+                thumbnail_path=rel_thumb,
                 details=data['details']
             )
             self.refresh_all_grids()
@@ -215,17 +224,17 @@ class CatalogueWidget(QWidget):
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            # 1. Fetch item object to get the paths
             all_items = self.db.get_all_items()
             target_item = next((i for i in all_items if i.id == item_id), None)
             
             if target_item:
-                # 2. Delete Physical Files (Pass the absolute paths directly)
-                LibraryManager.delete_file(target_item.model_path)
+                # 1. Delete the Model Folder
+                # delete_item() calculates the parent folder automatically
+                LibraryManager.delete_item(target_item.model_path)
                 
+                # 2. Delete Thumbnail
                 if target_item.thumbnail_path:
-                    LibraryManager.delete_file(target_item.thumbnail_path)
-            
-            # 3. Remove from DB
+                    target = Path(target_item.thumbnail_path).resolve() #simple resolver for safety.
+                    os.remove(target)
             self.db.delete_item(item_id)
             self.refresh_all_grids()

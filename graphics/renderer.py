@@ -107,6 +107,7 @@ class ARViewerWidget(QOpenGLWidget):
             if mesh_data['tex']: glDeleteTextures([mesh_data['tex']])
             if mesh_data['vao']: glDeleteVertexArrays(1, [mesh_data['vao']])
         self.meshes = {}
+        # NOT clearing self.occluder_meshes here anymore.
         self.doneCurrent()
 
     # --- HELPER FUNCTIONS ---
@@ -247,28 +248,27 @@ class ARViewerWidget(QOpenGLWidget):
                 else:
                     cyl_instances.append(inst if not isinstance(inst, dict) else inst.get('matrix'))
 
-            # Draw Meshes
+            # A. Draw Meshes (Head/Body)
             for inst in mesh_instances:
                 key = inst.get('mesh_key')
                 mesh_data = self.occluder_meshes.get(key)
                 
-                # --- DEBUG PRINT (Remove later) ---
                 if not mesh_data:
+                    # Optional: Print warning only once to avoid spam
                     print(f"[Render] Warning: Request to draw {key} but mesh not loaded!") 
                     continue
                 glBindVertexArray(mesh_data['vao'])
                 glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, inst['matrix'])
                 glDrawElements(GL_TRIANGLES, mesh_data['count'], GL_UNSIGNED_INT, None)
 
-            # why removing procedural occluders?
-            # # B. Procedural cylinder occluders (legacy)
-            # if self.cylinder_ready and cyl_instances:
-            #     glBindVertexArray(self.vao_cylinder)
-            #     for instance_mat in cyl_instances:
-            #         if instance_mat is None:
-            #             continue
-            #         glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, instance_mat)
-            #         glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
+            # B. Draw Procedural Cylinders (Wrist/Ring/Waist)
+            if self.cylinder_ready and cyl_instances:
+                glBindVertexArray(self.vao_cylinder)
+                for instance_mat in cyl_instances:
+                    if instance_mat is None:
+                        continue
+                    glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, instance_mat)
+                    glDrawElements(GL_TRIANGLES, self.idx_count_cylinder, GL_UNSIGNED_INT, None)
 
             # Restore Color Mask if it was disabled
             if not self.debug_occluder:
