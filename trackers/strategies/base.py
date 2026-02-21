@@ -16,6 +16,7 @@ class TrackingStrategy:
         
         # 2. Settings Store (Values for sliders)
         self.settings = {} 
+        self.mode = "3d"
 
     def get_slider_definitions(self):
         """
@@ -38,6 +39,20 @@ class TrackingStrategy:
                  [0, focal_length, center[1]],
                  [0, 0, 1]], dtype=np.float64
             )
+
+    def _build_2d_matrix(self, pos_3d, roll_angle, scale):
+        """Builds a flat matrix facing the camera, only allowing Z-roll."""
+        T = np.eye(4, dtype=np.float32)
+        T[:3, 3] = pos_3d
+        
+        c, s = np.cos(roll_angle), np.sin(roll_angle)
+        R = np.eye(4, dtype=np.float32)
+        R[:3, :3] = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+        
+        S = np.diag([scale, scale, scale, 1.0])
+        
+        cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
+        return cv_to_gl @ T @ R @ S
 
     def process_frame(self, results, width, height):
         """

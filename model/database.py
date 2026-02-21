@@ -15,7 +15,6 @@ class JewelryDB:
 
     def _init_db(self):
         """Creates tables and handles schema updates."""
-        # We cast to str(DB_PATH) to be safe for all sqlite versions
         self.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         cursor = self.conn.cursor()
         
@@ -28,6 +27,7 @@ class JewelryDB:
                 model_path TEXT NOT NULL,
                 texture_path TEXT,
                 thumbnail_path TEXT,
+                image_2d_path TEXT,
                 settings TEXT,
                 details TEXT
             )
@@ -49,6 +49,11 @@ class JewelryDB:
             print("[DB] Migrating: Adding 'details' column...")
             cursor.execute("ALTER TABLE jewelry ADD COLUMN details TEXT DEFAULT ''")
         
+        # delete the db anyway.
+        # if "image_2d_path" not in columns:
+        #     print("[DB] Migrating: Adding 'image_2d_path' column...")
+        #     cursor.execute("ALTER TABLE jewelry ADD COLUMN image_2d_path TEXT")
+            
         self.conn.commit()
 
     def _ensure_default_admin(self):
@@ -80,12 +85,12 @@ class JewelryDB:
         return input_hash == stored_hash
 
     # --- JEWELRY CRUD ---
-    def add_item(self, name, category, model_path, texture_path=None, thumbnail_path=None, details=""):
+    def add_item(self, name, category, model_path, texture_path=None, thumbnail_path=None, image_2d_path=None, details=""):
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO jewelry (name, category, model_path, texture_path, thumbnail_path, details)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (name, category, model_path, texture_path, thumbnail_path, details))
+            INSERT INTO jewelry (name, category, model_path, texture_path, thumbnail_path, image_2d_path, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (name, category, model_path, texture_path, thumbnail_path, image_2d_path, details))
         self.conn.commit()
 
     def update_item_settings(self, item_id, settings_dict):
@@ -101,25 +106,31 @@ class JewelryDB:
 
     def get_all_items(self):
         cursor = self.conn.cursor()
-        cursor.execute('SELECT * FROM jewelry')
+        
+        # Explicitly selecting columns guarantees the index numbers (0 through 8) 
+        cursor.execute('''
+            SELECT id, name, category, model_path, texture_path, 
+                   thumbnail_path, image_2d_path, settings, details 
+            FROM jewelry
+        ''')
         rows = cursor.fetchall()
         
         items = []
         for row in rows:
-            settings = json.loads(row[6]) if row[6] else {}
-            details_text = row[7] if len(row) > 7 and row[7] else ""
+            settings = json.loads(row[7]) if row[7] else {}
+            details_text = row[8] if row[8] else ""
             
-            # --- PATH RESOLUTION FIX ---
-            # Convert relative DB path to Absolute System Path for the App
             abs_model_path = resolve_path(row[3])
             abs_tex_path = resolve_path(row[4]) if row[4] else ""
             abs_thumb_path = resolve_path(row[5]) if row[5] else ""
+            abs_img2d_path = resolve_path(row[6]) if row[6] else ""
             
             item = JewelryItem(
                 id=row[0], name=row[1], category=row[2], 
                 model_path=abs_model_path,    
                 texture_path=abs_tex_path,    
                 thumbnail_path=abs_thumb_path,
+                image_2d_path=abs_img2d_path,
                 settings=settings,
                 details=details_text
             )

@@ -180,6 +180,8 @@ class CatalogueWidget(QWidget):
             
             # --- 1. MANAGED LIBRARY IMPORT ---
             src_folder = data['model_path']
+            thumb_src = data['thumbnail_path']
+            img2d_src = data.get('image_2d_path') # Get 2D image
             cat = data['category']
             
             # 1. IMPORT FOLDER
@@ -197,15 +199,17 @@ class CatalogueWidget(QWidget):
             else:
                 # For Single Items, window.py expects a direct OBJ file.
                 if not rel_obj:
-                    QMessageBox.warning(self, "Warning", "No .obj file found in folder! Saving folder path instead.")
+                    # warning removed now it can be image.
+                    # QMessageBox.warning(self, "Warning", "No .obj file found in folder! Saving folder path instead.")
                     final_model_path = rel_folder
                 else:
                     final_model_path = rel_obj
 
             # 3. THUMBNAIL
-            rel_thumb = None
-            if data['thumbnail_path']:
-                rel_thumb = LibraryManager.import_thumbnail(data['thumbnail_path'])
+            rel_thumb = LibraryManager.import_thumbnail(thumb_src) if thumb_src else None
+            
+            # 3.1. IMPORT 2D IMAGE
+            rel_img2d = LibraryManager.import_2d_asset(img2d_src) if img2d_src else None
 
             # 4. SAVE TO DB
             self.db.add_item(
@@ -213,6 +217,7 @@ class CatalogueWidget(QWidget):
                 category=cat,
                 model_path=final_model_path,
                 thumbnail_path=rel_thumb,
+                image_2d_path=rel_img2d,
                 details=data['details']
             )
             self.refresh_all_grids()

@@ -37,7 +37,8 @@ class ForeheadStrategy(TrackingStrategy):
         ]
         
         # 4. SHARED OCCLUDER SLIDERS
-        sliders.extend(OccluderManager.get_head_sliders())
+        if getattr(self, 'mode', '3d') == "3d":
+            sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -86,6 +87,22 @@ class ForeheadStrategy(TrackingStrategy):
 
         pos_smooth = self.filter_pos.update(pos_final, time.time())
         
+        # flat tracking
+        if getattr(self, 'mode', '3d') == "2d":
+            # Calculate 2D Roll (Tilt) using the left and right sides of the head
+            dy = p_right[1] - p_left[1]
+            dx = p_right[0] - p_left[0]
+            roll_angle = math.atan2(dy, dx)
+            
+            # Add user spin
+            user_spin = math.radians(self.settings.get("Rot_Z", 0))
+            
+            # 2D Scale adjustment (adjust this multiplier if the image is too big/small)
+            scale_2d = self.settings.get("Scale", 150) * 0.001 
+            
+            # Build flat matrix and return ONLY the image (no occluder)
+            mat_2d = self._build_2d_matrix(pos_smooth, roll_angle + user_spin, scale_2d)
+            return [{'type': 'mesh', 'matrix': mat_2d}]
         cmds = []
         
         # A. Jewelry Matrix

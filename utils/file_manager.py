@@ -75,6 +75,26 @@ class LibraryManager:
             return None
 
     @staticmethod
+    def import_2d_asset(source_path):
+        """
+        Copies a 2D PNG/JPG image used for the 2D tracking mode.
+        """
+        source = Path(source_path)
+        if not source.exists(): return None
+        
+        # We can store these in the models directory or a new 'images' directory.
+        # Let's reuse MODELS_DIR so everything is kept together cleanly.
+        clean_name = f"2d_{source.stem}_{uuid.uuid4().hex[:8]}{source.suffix}"
+        dest = MODELS_DIR / clean_name
+        
+        try:
+            shutil.copy2(source, dest)
+            return f"models/{clean_name}"
+        except Exception as e:
+            print(f"Error importing 2D asset: {e}")
+            return None
+
+    @staticmethod
     def delete_item(model_path_from_db):
         """Safely deletes the item's folder."""
         if not model_path_from_db: return

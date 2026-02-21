@@ -47,12 +47,32 @@ class MainApp(QMainWindow):
 
     def go_to_tryon(self, item=None):
         """Starts camera/AI and loads the selected jewelry."""
+        if not item:
+            return
+
+        selected_mode = "3d" # Default
+
+        # --- Checking for 2D capability and ask user ---
+        if item.image_2d_path:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Select Try-On Mode")
+            msg.setText(f"How would you like to try on '{item.name}'?")
+            
+            btn_3d = msg.addButton("Try 3D Model", QMessageBox.ActionRole)
+            btn_2d = msg.addButton("Try 2D Image", QMessageBox.ActionRole)
+            btn_cancel = msg.addButton("Cancel", QMessageBox.RejectRole)
+            
+            msg.exec_()
+            
+            if msg.clickedButton() == btn_cancel:
+                return # Abort screen switch if cancel
+            elif msg.clickedButton() == btn_2d:
+                selected_mode = "2d"
         # 1. Start the Camera/AI threads
         self.tryon_screen.start_session() 
         
         # 2. Load the item (Sets the Strategy)
-        if item:
-            self.tryon_screen.set_active_item(item)
+        self.tryon_screen.set_active_item(item, mode=selected_mode)
             
         # 3. Switch Screen
         self.stack.setCurrentWidget(self.tryon_screen)

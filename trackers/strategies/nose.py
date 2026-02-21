@@ -29,7 +29,8 @@ class NoseStrategy(TrackingStrategy):
             ("Rot_Z", "Spin", -180, 180, 0, 1.0),
         ]
         # Append Shared Occluder Sliders
-        sliders.extend(OccluderManager.get_head_sliders())
+        if getattr(self, 'mode', '3d') == "3d":
+            sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -49,7 +50,34 @@ class NoseStrategy(TrackingStrategy):
         p_left_nostril = self._get_vec(lms[49], w, h)
         p_right_nostril = self._get_vec(lms[279], w, h)
 
-        # --- 2. Calculate Head Rotation ---
+        # --- 2. Calculate Base Position (Curved Interpolation) ---
+        side_val = self.settings.get("Side", 0)
+        if side_val < 0:
+            ratio = abs(side_val) / 500.0
+            pos_base = p_tip * (1 - ratio) + p_left_nostril * ratio
+        else:
+            ratio = side_val / 500.0
+            pos_base = p_tip * (1 - ratio) + p_right_nostril * ratio
+
+        # Smoothing
+        pos_smooth = self.filter_pos.update(pos_base, time.time())
+
+        # 2d flat tracking.
+        if getattr(self, 'mode', '3d') == "2d":
+            # Calculate 2D Roll using cheeks
+            dy = p_right_cheek[1] - p_left_cheek[1]
+            dx = p_right_cheek[0] - p_left_cheek[0]
+            roll_angle = math.atan2(dy, dx)
+            
+            user_spin = math.radians(self.settings.get("Rot_Z", 0))
+            scale_2d = self.settings.get("Scale", 150) * 0.001 
+            off_y = self.settings.get("Up_Down", 0) * 0.0001
+            
+            # The "Side" slider is already handled by your awesome pos_smooth interpolation above!
+            mat_2d = self._build_2d_matrix(pos_smooth, roll_angle + user_spin, scale_2d, offset_y=off_y)
+            return [{'type': 'mesh', 'matrix': mat_2d}]
+        
+        # --- 3. Calculate Head Rotation ---
         # Up: Bridge to Tip
         vec_up = p_top - p_tip
         vec_up /= np.linalg.norm(vec_up)
@@ -70,21 +98,6 @@ class NoseStrategy(TrackingStrategy):
         R_head[:3, 0] = vec_right
         R_head[:3, 1] = vec_up
         R_head[:3, 2] = vec_fwd
-
-        # --- 3. Calculate Base Position (Curved Interpolation) ---
-        side_val = self.settings.get("Side", 0)
-        if side_val < 0:
-            # Left side (0 to -500 maps to Tip -> Left Nostril)
-            ratio = abs(side_val) / 500.0
-            pos_base = p_tip * (1 - ratio) + p_left_nostril * ratio
-        else:
-            # Right side (0 to 500 maps to Tip -> Right Nostril)
-            ratio = side_val / 500.0
-            pos_base = p_tip * (1 - ratio) + p_right_nostril * ratio
-
-        # Smoothing
-        pos_smooth = self.filter_pos.update(pos_base, time.time())
-        # --------------------------------------
 
         cmds = []
         

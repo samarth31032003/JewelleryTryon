@@ -65,3 +65,47 @@ def load_mesh_data(path, is_occluder=False):
     except Exception as e:
         print(f"Error loading mesh {path}: {e}")
         return None
+    
+def create_2d_quad(aspect_ratio=1.0):
+    """
+    Generates a flat 2D plane (Quad) matching the image's aspect ratio.
+    """
+    # Normalize dimensions so the longest side is exactly 1.0
+    if aspect_ratio >= 1.0:
+        w = 1.0
+        h = 1.0 / aspect_ratio
+    else:
+        w = aspect_ratio
+        h = 1.0
+
+    # 4 Vertices of the rectangle
+    vertices = np.array([
+        [-w, -h, 0.0], # Bottom-Left
+        [ w, -h, 0.0], # Bottom-Right
+        [ w,  h, 0.0], # Top-Right
+        [-w,  h, 0.0]  # Top-Left
+    ], dtype=np.float32)
+
+    # Normals pointing straight at the camera (+Z)
+    norms = np.array([
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0]
+    ], dtype=np.float32)
+
+    # UV Mapping coordinates (how the image wraps onto the rectangle)
+    uvs = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [0.0, 1.0]
+    ], dtype=np.float32)
+
+    # 2 Triangles to form the Quad
+    faces = np.array([
+        [0, 1, 2],
+        [0, 2, 3]
+    ], dtype=np.uint32)
+
+    return MeshData(vertices, norms, uvs, faces, texture_data=None)

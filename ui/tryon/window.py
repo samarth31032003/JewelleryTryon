@@ -173,17 +173,21 @@ class TryOnWindow(QWidget):
 
     # --- LOGIC CONTROL ---
 
-    def set_active_item(self, item):
+    def set_active_item(self, item, mode="3d"):
         self.save_settings()
         self.current_item = item
+        self.current_mode = mode # 2d/3d mode
         self.viewer.clear_scene()
         
         strategy = self._get_strategy_for_category(item.category)
-        if strategy and item.settings:
-            if hasattr(strategy, 'update_settings'):
-                strategy.update_settings(item.settings)
-            else:
-                strategy.settings.update(item.settings)
+        if strategy :
+            strategy.mode = mode
+
+            if item.settings:
+                if hasattr(strategy, 'update_settings'):
+                    strategy.update_settings(item.settings)
+                else:
+                    strategy.settings.update(item.settings)
 
         # Restore scene settings
         if item.settings and isinstance(item.settings, dict):
@@ -211,13 +215,17 @@ class TryOnWindow(QWidget):
         return None
 
     def _process_pending_loads(self):
-        """Smart Loader: Handles Collections with Sub-Folders."""
+        """Smart Loader: Handles Collections with Sub-Folders, Handles 2D Sprites, 3D Collections, and 3D Singles.."""
         if not self.pending_item: return
+
         path = self.pending_item.model_path
-        
+        # SCENARIO 1: IT IS A COLLECTION (FOLDER)
         if os.path.isdir(path):
-            print(f"Loading Collection: {path}")
+            print(f"Loading Collection ({self.current_mode} mode): {path}")
             found_parts = {}
+            
+            # Decide what file extension we are hunting for
+            target_ext = '.png' if self.current_mode == "2d" else '.obj'
             
             def classify_part(name):
                 lower = name.lower()
@@ -228,26 +236,25 @@ class TryOnWindow(QWidget):
                 if "bindi" in lower: return "forehead"
                 return None
 
-            # 1. Sub-directories
-            for entry in os.scandir(path):
-                if entry.is_dir():
-                    key = classify_part(entry.name)
-                    if key:
-                        for sub_f in os.listdir(entry.path):
-                            if sub_f.lower().endswith('.obj'):
-                                full_path = os.path.join(entry.path, sub_f)
-                                found_parts[key] = full_path
+            # Scan the folder
+            for root, dirs, files in os.walk(path):
+                for fname in files:
+                    if fname.lower().endswith(target_ext):
+                        # Use folder name OR file name to classify
+                        # e.g., "ear/gold.obj" -> uses "ear" from folder name
+                        # e.g., "gold_earring.png" -> uses "ear" from file name
+                        folder_name = os.path.basename(root)
+                        key = classify_part(folder_name) or classify_part(fname)
+                        
+                        if key and key not in found_parts:
+                            full_path = os.path.join(root, fname)
+                            found_parts[key] = full_path
+                            
+                            # Load it into the viewer using the correct renderer method
+                            if self.current_mode == "2d":
+                                self.viewer.load_quad(full_path, key=key)
+                            else:
                                 self.viewer.load_object(full_path, key=key)
-                                break 
-
-            # 2. Root files
-            for fname in os.listdir(path):
-                if fname.lower().endswith('.obj'):
-                    key = classify_part(fname)
-                    if key and key not in found_parts:
-                        full_path = os.path.join(path, fname)
-                        found_parts[key] = full_path
-                        self.viewer.load_object(full_path, key=key)
 
             # 3. Pass to Strategy
             if isinstance(self.ai_worker.strategy, CollectionStrategy):
@@ -255,9 +262,17 @@ class TryOnWindow(QWidget):
                 if self.pending_item.settings:
                     self.ai_worker.strategy.update_settings(self.pending_item.settings)
                 self.controls.rebuild_sliders(self.ai_worker.strategy)
+        
+        # SCENARIO 2: SINGLE ITEM (NOT A FOLDER)
         else:
-            print(f"Loading Single: {path}")
-            self.viewer.load_object(path, key='default')
+            if self.current_mode == "2d" and self.pending_item.image_2d_path:
+                print(f"Loading Single 2D Sprite: {self.pending_item.image_2d_path}")
+                self.viewer.load_quad(self.pending_item.image_2d_path, key='default')
+            else:
+                print(f"Loading Single 3d: {path}")
+                # tex_path = getattr(self.pending_item, 'texture_path', None)
+                # self.viewer.load_object(path, texture_path=tex_path, key='default')
+                self.viewer.load_object(path, key='default') # no texture path yet.
 
         self.pending_item = None
 

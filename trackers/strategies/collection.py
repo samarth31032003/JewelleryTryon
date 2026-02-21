@@ -16,6 +16,20 @@ class CollectionStrategy(TrackingStrategy):
         self.SHARED_HEAD_KEYS = {"Occ_Head_Scale", "Occ_Head_X", "Occ_Head_Y", "Occ_Head_Z"}
         # Define which strategies share the head
         self.HEAD_STRAT_NAMES = ["ear", "nose", "forehead"]
+        
+        self._mode = "3d" # Internal mode tracker
+
+    # --- MODE BROADCASTER ---
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, val):
+        self._mode = val
+        # When mode changes, broadcast it to all active child strategies!
+        for strat in self.sub_strategies.values():
+            strat.mode = val
 
     def load_components(self, parts_dict):
         """
@@ -34,9 +48,9 @@ class CollectionStrategy(TrackingStrategy):
             elif "forehead" in key or "tikka" in key: strat = ForeheadStrategy()
             
             if strat:
+                strat.mode = self.mode # child inherit the mode.
                 self.sub_strategies[key] = strat
 
-        # Default Focus
         if self.sub_strategies:
             self.active_component = list(self.sub_strategies.keys())[0]
 

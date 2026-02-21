@@ -42,7 +42,8 @@ class NeckStrategy(TrackingStrategy):
             ("Rot_Z", "Spin", -180, 180, 0, 1.0),
         ]
         # MUST BE BODY SLIDERS
-        sliders.extend(OccluderManager.get_body_sliders())
+        if getattr(self, 'mode', '3d') == "3d":
+            sliders.extend(OccluderManager.get_body_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -84,19 +85,31 @@ class NeckStrategy(TrackingStrategy):
         vec = p_r - p_l
         dx, dy, dz = vec[0], vec[1], vec[2]
         
-        # Calculate Raw Angles
-        # Yaw (Turning Head): Rotation around Y-axis (XZ plane)
-        # We use -dz because OpenGL Z is backwards relative to our math sometimes, 
-        # but atan2(dz, dx) is standard. Let's stick to standard trig.
-        raw_yaw = math.atan2(dz, dx)
-        
         # Roll (Tilting Head Sideways): Rotation around Z-axis (XY plane)
         raw_roll = math.atan2(dy, dx)
         
         # Smooth the Angles
         now = time.time()
-        yaw_smooth = self.filter_yaw.update(raw_yaw, now)
         roll_smooth = self.filter_roll.update(raw_roll, now)
+
+        # flat tracking
+        if getattr(self, 'mode', '3d') == "2d":
+            # Add user spin
+            user_spin = math.radians(self.settings.get("Rot_Z", 0))
+            
+            # 2D Scale adjustment
+            scale_2d = self.settings.get("Scale", 150) * 0.001 
+            
+            # 2D Offsets (reusing existing UI logic)
+            off_y = self.settings.get("Up_Down", 0) * 0.0001
+            
+            # Build flat matrix and return ONLY the image
+            mat_2d = self._build_2d_matrix(p_smooth, roll_smooth + user_spin, scale_2d, offset_y=off_y)
+            return [{'type': 'mesh', 'matrix': mat_2d}]
+                
+        # 3d math.
+        raw_yaw = math.atan2(dz, dx)
+        yaw_smooth = self.filter_yaw.update(raw_yaw, now)
         
         # Reconstruct Rotation Matrix from Smoothed Angles
         # We construct the "Shoulder Rotation" matrix manually

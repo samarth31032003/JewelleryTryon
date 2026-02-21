@@ -1,6 +1,6 @@
-# data/models.py
-from dataclasses import dataclass, field
-from typing import Dict, Any
+# model/models.py
+from dataclasses import dataclass
+from typing import Optional
 
 @dataclass
 class JewelryItem:
@@ -8,8 +8,8 @@ class JewelryItem:
     name: str
     category: str
     model_path: str
-    texture_path: str = None
-    thumbnail_path: str = None
-    # Stores slider values: {'B_Scale': 105, 'B_Rot_X': 90, ...}
-    settings: Dict[str, Any] = field(default_factory=dict)
+    texture_path: Optional[str] = None
+    thumbnail_path: Optional[str] = None 
+    image_2d_path: Optional[str] = None 
+    settings: dict = None
     details: str = ""

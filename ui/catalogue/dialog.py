@@ -15,7 +15,7 @@ class AddItemDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add New Jewelry")
-        self.resize(450, 600)
+        self.resize(450, 650)
         self.setStyleSheet(get_stylesheet())
         
         layout = QVBoxLayout(self)
@@ -50,7 +50,19 @@ class AddItemDialog(QDialog):
         btn_thumb = QPushButton("Browse Image"); btn_thumb.clicked.connect(self.browse_thumb)
         h_thumb.addWidget(self.txt_thumb); h_thumb.addWidget(btn_thumb)
         layout.addLayout(h_thumb)
-
+        
+        # --- NEW 2D TRACKING IMAGE ROW ---
+        layout.addWidget(QLabel("2D Tracking Image (.png) [Optional]:"))
+        h_2d = QHBoxLayout()
+        self.txt_2d = QLineEdit()
+        self.txt_2d.setReadOnly(True)
+        self.txt_2d.setPlaceholderText("Leave blank if 3D only")
+        btn_browse_2d = QPushButton("Browse Image")
+        btn_browse_2d.clicked.connect(self.browse_2d)
+        h_2d.addWidget(self.txt_2d)
+        h_2d.addWidget(btn_browse_2d)
+        layout.addLayout(h_2d)
+        
         # Details
         layout.addWidget(QLabel("Details:"))
         self.txt_details = QTextEdit()
@@ -75,6 +87,11 @@ class AddItemDialog(QDialog):
         f, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg)")
         if f: self.txt_thumb.setText(f)
         
+    def browse_2d(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select 2D Image", "", "PNG Images (*.png)")
+        if f: 
+            self.txt_2d.setText(f)
+
     def validate_and_accept(self):
         name = self.txt_name.text()
         path = self.txt_model.text()
@@ -108,5 +125,6 @@ class AddItemDialog(QDialog):
             "category": self.cmb_cat.currentText(),
             "model_path": self.txt_model.text(), # the SOURCE FOLDER path
             "thumbnail_path": self.txt_thumb.text() if self.txt_thumb.text() else None,
+            "image_2d_path": self.txt_2d.text() if self.txt_2d.text() else None,
             "details": self.txt_details.toPlainText()
         }

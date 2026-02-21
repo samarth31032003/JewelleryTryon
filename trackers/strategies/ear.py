@@ -39,7 +39,8 @@ class EarringStrategy(TrackingStrategy):
         
         # 4. SHARED OCCLUDER SLIDERS
         # MUST BE HEAD SLIDERS
-        sliders.extend(OccluderManager.get_head_sliders())
+        if getattr(self, 'mode', '3d') == "3d":
+            sliders.extend(OccluderManager.get_head_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -52,6 +53,40 @@ class EarringStrategy(TrackingStrategy):
         p_top = self._get_vec(lms[168], w, h)
         p_left = self._get_vec(lms[234], w, h)
         p_right = self._get_vec(lms[454], w, h)
+
+        # --- 2. Calculate Ear Positions ---
+        p_lobe_L = self._get_vec(lms[177], w, h)
+        p_lobe_R = self._get_vec(lms[401], w, h)
+        
+        now = time.time()
+        pos_L = self.filter_left.update(p_lobe_L, now)
+        pos_R = self.filter_right.update(p_lobe_R, now)
+        
+        cmds = []
+
+        # 2d flat tracking.
+        if getattr(self, 'mode', '3d') == "2d":
+            # Calculate 2D Roll using left and right sides of face
+            dy = p_right[1] - p_left[1]
+            dx = p_right[0] - p_left[0]
+            roll_angle = math.atan2(dy, dx)
+            
+            user_spin = math.radians(self.settings.get("Rot_Z", 0))
+            scale_2d = self.settings.get("Scale", 150) * 0.001 
+            
+            # Offsets
+            off_y = self.settings.get("Up_Down", 0) * 0.0001
+            side_off = self.settings.get("Side", 0) * 0.0001
+
+            # Left Earring
+            mat_L_2d = self._build_2d_matrix(pos_L, roll_angle + user_spin, scale_2d, offset_x=-side_off, offset_y=off_y)
+            cmds.append({'type': 'mesh', 'matrix': mat_L_2d})
+            
+            # Right Earring
+            mat_R_2d = self._build_2d_matrix(pos_R, roll_angle + user_spin, scale_2d, offset_x=side_off, offset_y=off_y)
+            cmds.append({'type': 'mesh', 'matrix': mat_R_2d})
+            
+            return cmds
 
         # Calculate Axes
         vec_up = p_top - p_tip; vec_up /= np.linalg.norm(vec_up)
@@ -66,16 +101,6 @@ class EarringStrategy(TrackingStrategy):
         R_head[:3, 1] = vec_up
         R_head[:3, 2] = vec_fwd
 
-        # --- 2. Calculate Ear Positions ---
-        p_lobe_L = self._get_vec(lms[177], w, h)
-        p_lobe_R = self._get_vec(lms[401], w, h)
-        
-        now = time.time()
-        pos_L = self.filter_left.update(p_lobe_L, now)
-        pos_R = self.filter_right.update(p_lobe_R, now)
-        
-        cmds = []
-        
         # Left Earring
         mat_L = self._build_matrix(pos_L, R_head, is_left=True)
         cmds.append({'type': 'mesh', 'matrix': mat_L})
