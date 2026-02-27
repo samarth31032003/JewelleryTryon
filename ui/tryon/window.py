@@ -217,15 +217,13 @@ class TryOnWindow(QWidget):
     def _process_pending_loads(self):
         """Smart Loader: Handles Collections with Sub-Folders, Handles 2D Sprites, 3D Collections, and 3D Singles.."""
         if not self.pending_item: return
-
+        
         path = self.pending_item.model_path
+        
         # SCENARIO 1: IT IS A COLLECTION (FOLDER)
-        if os.path.isdir(path):
+        if path and os.path.isdir(path):
             print(f"Loading Collection ({self.current_mode} mode): {path}")
             found_parts = {}
-            
-            # Decide what file extension we are hunting for
-            target_ext = '.png' if self.current_mode == "2d" else '.obj'
             
             def classify_part(name):
                 lower = name.lower()
@@ -236,43 +234,47 @@ class TryOnWindow(QWidget):
                 if "bindi" in lower: return "forehead"
                 return None
 
-            # Scan the folder
             for root, dirs, files in os.walk(path):
+                # We classify based on the FOLDER name first, then file name
+                folder_name = os.path.basename(root)
+                part_key = classify_part(folder_name)
+                
                 for fname in files:
-                    if fname.lower().endswith(target_ext):
-                        # Use folder name OR file name to classify
-                        # e.g., "ear/gold.obj" -> uses "ear" from folder name
-                        # e.g., "gold_earring.png" -> uses "ear" from file name
-                        folder_name = os.path.basename(root)
-                        key = classify_part(folder_name) or classify_part(fname)
+                    ext = fname.lower()
+                    final_key = part_key or classify_part(fname)
+                    
+                    if not final_key: continue # Skip if we don't know what body part this is
+                    if final_key in found_parts: continue # Skip if we already loaded this part
+                    
+                    full_path = os.path.join(root, fname)
+                    
+                    if self.current_mode == "3d" and ext.endswith('.obj'):
+                        found_parts[final_key] = full_path
+                        self.viewer.load_object(full_path, key=final_key)
                         
-                        if key and key not in found_parts:
-                            full_path = os.path.join(root, fname)
-                            found_parts[key] = full_path
-                            
-                            # Load it into the viewer using the correct renderer method
-                            if self.current_mode == "2d":
-                                self.viewer.load_quad(full_path, key=key)
-                            else:
-                                self.viewer.load_object(full_path, key=key)
-
+                    elif self.current_mode == "2d" and ext.endswith('.png'):
+                        # Optional safety: Avoid loading 3D texture maps as 2D sprites.
+                        # You can enforce that 2D sprites must have '2d' in the filename:
+                        # if '2d' not in fname.lower(): continue
+                        # extra security skipping currently.
+                        found_parts[final_key] = full_path
+                        self.viewer.load_quad(full_path, key=final_key)
+       
             # 3. Pass to Strategy
             if isinstance(self.ai_worker.strategy, CollectionStrategy):
                 self.ai_worker.strategy.load_components(found_parts)
                 if self.pending_item.settings:
                     self.ai_worker.strategy.update_settings(self.pending_item.settings)
                 self.controls.rebuild_sliders(self.ai_worker.strategy)
-        
+
         # SCENARIO 2: SINGLE ITEM (NOT A FOLDER)
         else:
             if self.current_mode == "2d" and self.pending_item.image_2d_path:
                 print(f"Loading Single 2D Sprite: {self.pending_item.image_2d_path}")
                 self.viewer.load_quad(self.pending_item.image_2d_path, key='default')
-            else:
-                print(f"Loading Single 3d: {path}")
-                # tex_path = getattr(self.pending_item, 'texture_path', None)
-                # self.viewer.load_object(path, texture_path=tex_path, key='default')
-                self.viewer.load_object(path, key='default') # no texture path yet.
+            elif self.current_mode == "3d" and path:
+                print(f"Loading Single 3D Object: {path}")
+                self.viewer.load_object(path, key='default')
 
         self.pending_item = None
 

@@ -178,37 +178,25 @@ class CatalogueWidget(QWidget):
         if dlg.exec_():
             data = dlg.get_data()
             
-            # --- 1. MANAGED LIBRARY IMPORT ---
             src_folder = data['model_path']
             thumb_src = data['thumbnail_path']
-            img2d_src = data.get('image_2d_path') # Get 2D image
+            img2d_src = data.get('image_2d_path') 
             cat = data['category']
             
-            # 1. IMPORT FOLDER
+            # 1. IMPORT 3D FOLDER (Only if provided)
             # Returns: ("models/Set_123", "models/Set_123/ring.obj")
-            rel_folder, rel_obj = LibraryManager.import_asset_folder(src_folder)
-            
-            if not rel_folder:
-                QMessageBox.critical(self, "Error", "Failed to import folder.")
-                return
+            final_model_path = ""
+            if src_folder:
+                rel_folder, rel_obj = LibraryManager.import_asset_folder(src_folder)
+                if not rel_folder:
+                    QMessageBox.critical(self, "Error", "Failed to import 3D folder.")
+                    return
+                final_model_path = rel_folder if cat == "Collection" else (rel_obj if rel_obj else rel_folder)
 
-            # 2. DECIDE PATH TO SAVE
-            if cat == "Collection":
-                # For Collections, window.py needs the FOLDER to scan it.
-                final_model_path = rel_folder
-            else:
-                # For Single Items, window.py expects a direct OBJ file.
-                if not rel_obj:
-                    # warning removed now it can be image.
-                    # QMessageBox.warning(self, "Warning", "No .obj file found in folder! Saving folder path instead.")
-                    final_model_path = rel_folder
-                else:
-                    final_model_path = rel_obj
-
-            # 3. THUMBNAIL
+            # 2. IMPORT THUMBNAIL
             rel_thumb = LibraryManager.import_thumbnail(thumb_src) if thumb_src else None
             
-            # 3.1. IMPORT 2D IMAGE
+            # 3. IMPORT 2D IMAGE
             rel_img2d = LibraryManager.import_2d_asset(img2d_src) if img2d_src else None
 
             # 4. SAVE TO DB

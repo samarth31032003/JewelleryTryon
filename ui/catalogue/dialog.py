@@ -94,28 +94,44 @@ class AddItemDialog(QDialog):
 
     def validate_and_accept(self):
         name = self.txt_name.text()
-        path = self.txt_model.text()
-
-        if not name or not path:
-            QMessageBox.warning(self, "Error", "Name and Path required.")
-            return
-            
-        if not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Please select a Folder.")
+        cat = self.cmb_cat.currentText()
+        path_3d = self.txt_model.text()
+        path_2d = self.txt_2d.text()
+        
+        if not name:
+            QMessageBox.warning(self, "Missing Data", "Item Name is required.")
             return
 
-        # RECURSIVE CHECK
-        has_obj = False
-        for root, dirs, files in os.walk(path):
-            for f in files:
-                if f.lower().endswith('.obj'):
-                    has_obj = True
-                    break
-            if has_obj: break
+        if cat == "Collection":
+            if not path_3d:
+                QMessageBox.warning(self, "Error", "For Collections, please select a Master Folder in the 3D field (it can contain 2D pngs, 3D objs, or both).")
+                return
+            if not os.path.isdir(path_3d):
+                QMessageBox.warning(self, "Error", "Selected Collection path is not a folder!")
+                return
+                
+            # Scan for AT LEAST ONE .obj OR .png
+            has_valid_file = False
+            for root, dirs, files in os.walk(path_3d):
+                for f in files:
+                    ext = f.lower()
+                    if ext.endswith('.obj') or ext.endswith('.png'):
+                        has_valid_file = True
+                        break
+                if has_valid_file: break
+                
+            if not has_valid_file:
+                QMessageBox.warning(self, "Error", "The Collection folder must contain at least one .obj or .png file.")
+                return
+
+        else: # Single Items
+            if not path_3d and not path_2d:
+                QMessageBox.warning(self, "Missing Data", "You must provide EITHER a 3D Folder OR a 2D Image (or both).")
+                return
             
-        if not has_obj:
-            QMessageBox.warning(self, "Error", "No .obj files found in this folder (or subfolders)!")
-            return
+            if path_3d and not os.path.isdir(path_3d):
+                QMessageBox.warning(self, "Error", "Selected 3D path is not a folder!")
+                return
 
         self.accept()
         
