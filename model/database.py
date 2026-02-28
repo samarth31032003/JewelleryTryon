@@ -14,11 +14,11 @@ class JewelryDB:
         self._ensure_default_admin()
 
     def _init_db(self):
-        """Creates tables and handles schema updates."""
+        """Creates tables with the final schema (requires deleting the old .db file first)."""
         self.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         cursor = self.conn.cursor()
         
-        # 1. Base Table
+        # 1. Base Table: Jewelry
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS jewelry (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,25 +29,37 @@ class JewelryDB:
                 thumbnail_path TEXT,
                 image_2d_path TEXT,
                 settings TEXT,
-                details TEXT
+                details TEXT DEFAULT ''
             )
         ''')
         
-        # 2. Auth Table
+        # 2. Auth & License Table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS auth (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL
+                salt TEXT NOT NULL,
+                last_online REAL,
+                last_seen REAL,
+                license_sig TEXT
             )
         """)
         
-        # 3. MIGRATION
+        # 3. MIGRATION (optional for dev changes.)
         cursor.execute("PRAGMA table_info(jewelry)")
         columns = [info[1] for info in cursor.fetchall()]
         if "details" not in columns:
             print("[DB] Migrating: Adding 'details' column...")
             cursor.execute("ALTER TABLE jewelry ADD COLUMN details TEXT DEFAULT ''")
+        
+        # Migrations for auth table
+        cursor.execute("PRAGMA table_info(auth)")
+        auth_columns = [info[1] for info in cursor.fetchall()]
+        if "last_online" not in auth_columns:
+            print("[DB] Migrating: Adding license tracking columns to auth table...")
+            cursor.execute("ALTER TABLE auth ADD COLUMN last_online REAL")
+            cursor.execute("ALTER TABLE auth ADD COLUMN last_seen REAL")
+            cursor.execute("ALTER TABLE auth ADD COLUMN license_sig TEXT")
         
         # delete the db anyway.
         # if "image_2d_path" not in columns:
@@ -70,6 +82,7 @@ class JewelryDB:
         salt = secrets.token_hex(16) 
         p_hash = hashlib.sha256((salt + plain_password).encode()).hexdigest()
         cursor = self.conn.cursor()
+        # Ensure we only ever have row id=1
         cursor.execute("DELETE FROM auth WHERE id=1")
         cursor.execute("INSERT INTO auth (id, password_hash, salt) VALUES (1, ?, ?)", (p_hash, salt))
         self.conn.commit()
@@ -83,6 +96,48 @@ class JewelryDB:
         stored_hash, salt = row
         input_hash = hashlib.sha256((salt + plain_input).encode()).hexdigest()
         return input_hash == stored_hash
+
+    def _generate_license_sig(self, last_online, last_seen, salt, hwid):
+        # We include the HWID to bind the signature to the specific machine
+        data = f"{last_online}_{last_seen}_{salt}_{hwid}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    def save_license_state(self, last_online, last_seen, hwid):
+        """Saves current timestamps with an anti-tamper signature."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT salt FROM auth WHERE id=1")
+        row = cursor.fetchone()
+        if not row:
+            return False # Admin password not set up yet
+            
+        salt = row[0]
+        sig = self._generate_license_sig(last_online, last_seen, salt, hwid)
+        
+        cursor.execute("""
+            UPDATE auth 
+            SET last_online = ?, last_seen = ?, license_sig = ? 
+            WHERE id=1
+        """, (last_online, last_seen, sig))
+        self.conn.commit()
+        return True
+
+    def get_license_state(self, hwid):
+        """Retrieves and validates timestamps. Returns (last_online, last_seen) or None if tampered/missing."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT last_online, last_seen, license_sig, salt FROM auth WHERE id=1")
+        row = cursor.fetchone()
+        
+        if not row or row[0] is None or row[1] is None or row[2] is None:
+            return None
+            
+        last_online, last_seen, stored_sig, salt = row
+        
+        expected_sig = self._generate_license_sig(last_online, last_seen, salt, hwid)
+        if expected_sig != stored_sig:
+            print("[DB] Warning: License signature mismatch. Tampering detected.")
+            return None
+            
+        return last_online, last_seen
 
     # --- JEWELRY CRUD ---
     def add_item(self, name, category, model_path, texture_path=None, thumbnail_path=None, image_2d_path=None, details=""):
@@ -107,7 +162,6 @@ class JewelryDB:
     def get_all_items(self):
         cursor = self.conn.cursor()
         
-        # Explicitly selecting columns guarantees the index numbers (0 through 8) 
         cursor.execute('''
             SELECT id, name, category, model_path, texture_path, 
                    thumbnail_path, image_2d_path, settings, details 

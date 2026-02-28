@@ -1,60 +1,102 @@
 # utils/security.py
 import subprocess
-import requests
-import sys
+import urllib.request
+import json
 import platform
+import time
+from model.database import JewelryDB
 
 class LicenseGuard:
-    # Replace this with your raw GitHub/Vercel JSON URL later
-    LICENSE_URL = "https://your-static-site.com/allowed_devices.json"
-    
+    # Your Cloudflare Worker URL
+    API_URL = "https://license-api.ee-irfansmail.workers.dev/check?hwid="
+
     @staticmethod
     def get_hwid():
-        """Gets a unique Motherboard/System ID."""
+        """Generates a unique hardware ID locked to the Windows Motherboard."""
         try:
             if platform.system() == "Windows":
-                cmd = 'wmic csproduct get uuid'
-                # Run command, decode output, strip headers
-                output = subprocess.check_output(cmd, shell=True).decode()
-                return output.split('\n')[1].strip()
+                # Asks Windows for the UUID of the machine
+                hwid = subprocess.check_output('wmic csproduct get uuid', shell=True).decode().split('\n')[1].strip()
+                return hwid
             else:
                 # Fallback for Linux Dev
                 return "LINUX_DEV_ID"
-        except Exception:
-            return "UNKNOWN_ID"
+        except Exception as e:
+            # Added a print statement so it doesn't fail silently.
+            print(f"[License Guard Debug] HWID generation failed: {e}")
+            return "UNKNOWN-HWID"
 
     @staticmethod
     def validate_license():
-        """
-        Fetches the allowed list from the web.
-        Returns True if allowed, False if banned/unlicensed.
-        """
-        my_id = LicenseGuard.get_hwid()
-        print(f"Checking License for HWID: {my_id}")
+        """Checks the Cloudflare API to see if this HWID is active."""
+        hwid = LicenseGuard.get_hwid()
+        print(f"Checking License for HWID: {hwid}")
         
-        # DEV BYPASS: If you are developing, you don't want to lock yourself out
-        # Remove this block when shipping to client!
-        if my_id == "LINUX_DEV_ID": 
+        # Bypass for local Linux development
+        # if hwid == "LINUX_DEV_ID": 
+        #     print("[License] Linux Dev Mode: Bypassing network check.")
+        #     return True        
+        
+        db = JewelryDB()
+        current_time = time.time()
+        
+        try:
+            url = f"{LicenseGuard.API_URL}{hwid}"
+            
+            # ---  Fake a Chrome Browser User-Agent for cloudflare---
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            req = urllib.request.Request(url, headers=headers)
+
+            # 5 second timeout so the app doesn't freeze forever if internet is slow
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                
+                if data.get("status") == "active":
+                    print(f"[License] internet! Validated successfully for client: {data.get('client', 'Unknown')}")
+                    
+                    # Update DB with current time for offline mode later
+                    db.save_license_state(current_time, current_time, hwid)
+                    db.close()
+                    return True
+                
+                print("[License] internet! Blocked: License is revoked or unregistered.")
+                db.close()
+                return False
+                
+        except Exception as e:
+            # If there's no internet or the API is unreachable, we check the offline grace period.
+            print(f"[License] no internet! Connection failed: {e}. Checking offline grace period...")
+            
+            state = db.get_license_state(hwid)
+            if not state:
+                print("[License] Offline Check Failed: Missing or tampered license state.")
+                db.close()
+                return False
+                
+            last_online, last_seen = state
+            
+            # Time-Travel Check: Clock should not go backward
+            if current_time < last_seen - 300: # 5 min tolerance for minor clock drift
+                print("[License] Offline Check Failed: System clock rewind detected.")
+                db.close()
+                return False
+                
+            # Grace Period Check: Max 3 days (3 * 24 * 3600 seconds)
+            three_days_sec = 3 * 24 * 3600
+            time_offline = current_time - last_online
+            
+            days_offline = time_offline / (24 * 3600)
+
+            if time_offline > three_days_sec:
+                print(f"[License] Offline Check Failed: Grace period expired ({days_offline:.1f} days offline).")
+                db.close()
+                return False
+                
+            # Valid offline session: update last_seen, keep last_online
+            print(f"[License] Offline Grace Period Valid. Updating last_seen timestamp.")
+            db.save_license_state(last_online, current_time, hwid)
+            db.close()
             return True
 
-        try:
-            # 1. Fetch the JSON list
-            # Format expected: {"allowed": ["UUID-1", "UUID-2"], "banned": []}
-            response = requests.get(LicenseGuard.LICENSE_URL, timeout=5)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if my_id in data.get("allowed", []):
-                    return True
-            
-            print("License Verification Failed: ID not found in database.")
-            return False
-            
-        except Exception as e:
-            print(f"License Server Error: {e}")
-            # DECISION: Do you allow offline usage? 
-            # If yes, return True here. If strict DRM, return False.
-            # For now, let's Fail Open (Allow) if internet is down to be nice? 
-            # Or Fail Closed (Block) for security?
-            # Let's Fail Closed for safety:
-            return False
