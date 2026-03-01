@@ -1,8 +1,18 @@
-data
+# Ignore everything inside data
+data/*
+# Re-allow assets folder
+!data/assets/
+# Re-allow everything inside assets
+!data/assets/**
+
 .vscode
 __pycache__
+
 # 3D assets
 *.obj
+# But allow obj files inside data/assets
+!data/assets/**/*.obj
+
 *.fbx
 *.glb
 *.ply
