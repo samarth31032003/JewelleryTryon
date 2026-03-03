@@ -28,10 +28,7 @@ class CameraWorker(QThread):
         print(f"[CameraWorker] Opening Camera {self.camera_index}...")
         
         # Optimization: Use DirectShow on Windows for faster startup/switching
-        if os.name == 'nt':
-            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-        else:
-            self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap = cv2.VideoCapture(self.camera_index)
         
         # 1. Request High Resolution (e.g., 16:9 HD)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.req_w)

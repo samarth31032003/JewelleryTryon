@@ -5,6 +5,11 @@ import json
 import platform
 import time
 from model.database import JewelryDB
+# try-except so it doesn't crash on Linux
+try:
+    import winreg
+except ImportError:
+    pass
 
 class LicenseGuard:
     # Your Cloudflare Worker URL
@@ -15,9 +20,21 @@ class LicenseGuard:
         """Generates a unique hardware ID locked to the Windows Motherboard."""
         try:
             if platform.system() == "Windows":
-                # Asks Windows for the UUID of the machine
-                hwid = subprocess.check_output('wmic csproduct get uuid', shell=True).decode().split('\n')[1].strip()
-                return hwid
+                # Safest method for compiled EXEs: Read the OS Cryptography Machine GUID
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+                        hwid, _ = winreg.QueryValueEx(key, "MachineGuid")
+                        return hwid.upper()
+                except Exception as e:
+                    print(f"[License] Registry read failed: {e}. Falling back to WMIC.")
+                    # Fallback just in case
+                    hwid = subprocess.check_output(
+                        'wmic csproduct get uuid', 
+                        shell=True, 
+                        stdin=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    ).decode().split('\n')[1].strip()
+                    return hwid
             else:
                 # Fallback for Linux Dev
                 return "LINUX_DEV_ID"

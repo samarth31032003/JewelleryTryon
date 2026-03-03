@@ -1,7 +1,12 @@
 # main.py
 import os
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessageBox
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QStackedWidget, QMessageBox, 
+    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton
+)
+from PyQt5.QtCore import Qt
+
 from model.database import JewelryDB
 from ui.catalogue import CatalogueWidget 
 from ui.login import LoginWindow
@@ -106,17 +111,48 @@ class MainApp(QMainWindow):
             self.tryon_screen.stop_session()
         event.accept()
 
+# --- CUSTOM LICENSE POPUP ---
+class LicenseErrorDialog(QDialog):
+    def __init__(self, hwid, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Software Activation Required")
+        self.setFixedSize(450, 180)
+        
+        layout = QVBoxLayout()
+        
+        lbl_msg = QLabel(
+            "Unregistered Device Detected.\n\n"
+            "Please copy the Hardware ID below and send it to Sringar Jewellers to activate your software license."
+        )
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setStyleSheet("font-size: 13px;")
+        layout.addWidget(lbl_msg)
+        
+        self.hwid_input = QLineEdit(hwid)
+        self.hwid_input.setReadOnly(True) 
+        self.hwid_input.setStyleSheet("background-color: #f8f9fa; padding: 8px; font-family: monospace; font-size: 14px; border: 1px solid #ccc;")
+        layout.addWidget(self.hwid_input)
+        
+        self.btn_copy = QPushButton("📋 Copy to Clipboard")
+        self.btn_copy.setStyleSheet("padding: 10px; font-weight: bold; font-size: 13px;")
+        self.btn_copy.clicked.connect(self.copy_hwid)
+        layout.addWidget(self.btn_copy)
+        
+        self.setLayout(layout)
+
+    def copy_hwid(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.hwid_input.text())
+        self.btn_copy.setText("✅ Copied to Clipboard!")
+        self.btn_copy.setStyleSheet("padding: 10px; font-weight: bold; font-size: 13px; background-color: #dcfce7; color: #166534; border: 1px solid #166534;")
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     # This ensures unauthorized copies cannot even see the login screen
     if not LicenseGuard.validate_license():
-        err = QMessageBox()
-        err.setIcon(QMessageBox.Critical)
-        err.setWindowTitle("License Error")
-        err.setText("Unauthorized Device.")
-        err.setInformativeText(f"Your Hardware ID:\n{LicenseGuard.get_hwid()}\n\nContact support to activate.")
-        err.exec_()
+        dialog = LicenseErrorDialog(LicenseGuard.get_hwid())
+        dialog.exec_()
         sys.exit(1)
 
     window = MainApp()
