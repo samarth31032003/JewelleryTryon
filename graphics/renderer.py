@@ -43,11 +43,12 @@ class ARViewerWidget(QOpenGLWidget):
         self.near_plane = 0.1
         self.far_plane = 1000.0
         self.light_pos = [0.0, 10.0, 10.0]
-        self.ambient_str = 0.4
-        self.diffuse_str = 0.8
-        
+
+        # custom lighting
+        self.ambient_str = 0.4   # Keep shadows dark or 1.0 to reset
+        self.diffuse_str = 0.6   # 0.4 + 0.6 = 1.0 (Prevents blowout) or 0.0 to reset
         self.exposure = 1.0
-        self.gamma = 2.2
+        self.gamma = 1.0
 
         # Camera / Viewport
         self.cam_w = 640
