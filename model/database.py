@@ -47,6 +47,14 @@ class JewelryDB:
                 license_sig TEXT
             )
         """)
+
+        # 3. Settings Table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT UNIQUE,
+                value TEXT
+            )
+        ''')
         
         # 3. MIGRATION (optional for dev changes.)
         cursor.execute("PRAGMA table_info(jewelry)")
@@ -141,6 +149,23 @@ class JewelryDB:
             return None
             
         return last_online, last_seen
+
+    # --- APP SETTINGS ---
+    def save_setting(self, key, value):
+        cursor = self.conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", (key, str(value)))
+        self.conn.commit()
+
+    def get_setting(self, key, default_value=None):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+        except Exception as e:
+            log.warning(f"[DB] Error fetching setting {key}: {e}")
+        return default_value
 
     # --- JEWELRY CRUD ---
     def add_item(self, name, category, model_path, texture_path=None, thumbnail_path=None, image_2d_path=None, details=""):

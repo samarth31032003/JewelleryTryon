@@ -5,8 +5,18 @@ import os
 from PyQt5.QtCore import QThread, pyqtSignal
 import numpy as np
 from utils.logger import logger
+from model.database import JewelryDB
 
 log = logger.bind(component="camera")
+
+def get_available_cameras():
+    available = []
+    for i in range(4):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW) if os.name == 'nt' else cv2.VideoCapture(i)
+        if cap is not None and cap.isOpened():
+            available.append(i)
+            cap.release()
+    return available
 
 class CameraWorker(QThread):
     """
@@ -28,6 +38,12 @@ class CameraWorker(QThread):
 
     def run(self):
         """The main loop of the thread."""
+        db = JewelryDB()
+        new_cam_index = int(db.get_setting('camera_index', self.camera_index))
+        if new_cam_index != self.camera_index:
+            log.info(f"[CameraWorker] Switching camera from {self.camera_index} to {new_cam_index}")
+            self.camera_index = new_cam_index
+
         log.info(f"[CameraWorker] Opening Camera {self.camera_index}...")
         
         # Optimization: Use DirectShow on Windows for faster startup/switching

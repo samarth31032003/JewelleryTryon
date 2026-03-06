@@ -11,6 +11,7 @@ from .dialog import AddItemDialog, SUPPORTED_CATEGORIES
 from .details import ItemDetailsDialog 
 
 from utils.file_manager import LibraryManager
+from ui.settings import SettingsDialog
 
 class CatalogueWidget(QWidget):
     item_selected = pyqtSignal(object) 
@@ -57,8 +58,23 @@ class CatalogueWidget(QWidget):
         btn_add.setObjectName("PrimaryButton")
         btn_add.clicked.connect(self.open_add_dialog)
 
-        h_header.addLayout(brand_box); h_header.addStretch()
-        h_header.addWidget(search_wrap); h_header.addSpacing(12); h_header.addWidget(btn_add)
+        # Create and style the Settings button
+        btn_settings = QPushButton("⚙️ Settings")
+        btn_settings.setStyleSheet(
+            "QPushButton { background-color: #1f2c42; border: 1px solid #2f7ae5; border-radius: 6px; padding: 6px 12px; color: #e8f0ff; font-weight: bold; }"
+            "QPushButton:hover { background-color: #2f7ae5; color: white; }"
+        )
+        btn_settings.clicked.connect(self.open_settings)
+
+        # Add everything to the horizontal header layout
+        h_header.addLayout(brand_box)
+        h_header.addStretch()
+        h_header.addWidget(search_wrap)
+        h_header.addSpacing(12)
+        h_header.addWidget(btn_settings)
+        h_header.addSpacing(12)
+        h_header.addWidget(btn_add)
+        
         layout.addLayout(h_header)
         layout.addSpacing(12)
 
@@ -209,6 +225,11 @@ class CatalogueWidget(QWidget):
                 details=data['details']
             )
             self.refresh_all_grids()
+
+    def open_settings(self):
+        dialog = SettingsDialog(self.db, self)
+        if dialog.exec_():
+            pass
 
     def delete_item(self, item_id):
         confirm = QMessageBox.question(
