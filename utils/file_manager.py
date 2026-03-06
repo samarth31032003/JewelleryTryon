@@ -4,6 +4,9 @@ import os
 import uuid
 from pathlib import Path
 from utils.paths import MODELS_DIR, THUMBNAILS_DIR, USER_DATA_ROOT
+from utils.logger import logger
+
+log = logger.bind(component="utils")
 
 class LibraryManager:
     """
@@ -18,7 +21,7 @@ class LibraryManager:
         """
         source = Path(source_path)
         if not source.exists() or not source.is_dir():
-            print(f"Error: Source is not a directory: {source}")
+            log.error(f"Error: Source is not a directory: {source}")
             return None, None
 
         # 1. Generate Unique Folder Name
@@ -57,7 +60,7 @@ class LibraryManager:
             return rel_folder, rel_obj
 
         except Exception as e:
-            print(f"Error importing asset folder: {e}")
+            log.error(f"Error importing asset folder: {e}")
             return None, None
 
     @staticmethod
@@ -91,7 +94,7 @@ class LibraryManager:
             shutil.copy2(source, dest)
             return f"models/{clean_name}"
         except Exception as e:
-            print(f"Error importing 2D asset: {e}")
+            log.error(f"Error importing 2D asset: {e}")
             return None
 
     @staticmethod
@@ -110,7 +113,7 @@ class LibraryManager:
             
         # Security: Ensure we are inside 'data/models'
         if MODELS_DIR.resolve() not in folder_to_delete.resolve().parents and MODELS_DIR.resolve() != folder_to_delete.resolve():
-            print("Security Block: Attempted to delete external path.")
+            log.warning("Security Block: Attempted to delete external path.")
             return
 
         if folder_to_delete.exists():

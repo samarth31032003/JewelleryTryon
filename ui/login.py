@@ -3,6 +3,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit,
                              QPushButton, QFrame, QMessageBox, QHBoxLayout)
 from PyQt5.QtCore import Qt, pyqtSignal
 from ui.styles import get_stylesheet
+from utils.logger import logger
+
+log = logger.bind(component="ui")
 
 class LoginWindow(QWidget):
     """
@@ -120,7 +123,7 @@ class LoginWindow(QWidget):
 
         # SECURE CHECK using the Database
         if self.db.verify_password(pwd):
-            print("Access Granted")
+            log.info("Access Granted")
             self.login_successful.emit()
         else:
             QMessageBox.warning(self, "Access Denied", "Incorrect Password.")

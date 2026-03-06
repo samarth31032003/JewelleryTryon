@@ -2,6 +2,9 @@
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QObject
 from trackers.pose_engine import PoseEngine
+from utils.logger import logger
+
+log = logger.bind(component="ai")
 
 class AIWorker(QThread):
     """
@@ -27,7 +30,7 @@ class AIWorker(QThread):
     def run(self):
         """Main Loop: Waits for a frame, processes it, sleeps."""
         self.is_running = True
-        print("[AIWorker] Starting AI Engine...")
+        log.info("[AIWorker] Starting AI Engine...")
         if self.ai_engine is None:
             self.ai_engine = PoseEngine()
 
@@ -51,7 +54,7 @@ class AIWorker(QThread):
                 try:
                     commands = self.strategy.process_frame(results, w, h)
                 except Exception as e:
-                    print(f"[AIWorker] Strategy Error: {e}")
+                    log.error(f"[AIWorker] Strategy Error: {e}")
                     commands = []
                 self.settings_mutex.unlock()
 
@@ -64,7 +67,7 @@ class AIWorker(QThread):
             # Sleep to prevent CPU hogging (1ms)
             self.msleep(1)
 
-        print("[AIWorker] Stopped.")
+        log.info("[AIWorker] Stopped.")
 
     def process_frame(self, frame):
         """Called by CameraWorker (via Main) to update the input."""

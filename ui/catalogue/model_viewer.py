@@ -7,6 +7,9 @@ from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import Qt
 from OpenGL.GL import *
 from OpenGL.GL.shaders import compileProgram, compileShader
+from utils.logger import logger
+
+log = logger.bind(component="ui")
 
 # --- SHADERS ---
 VERTEX_SHADER = """
@@ -82,7 +85,7 @@ class ModernMeshWidget(QOpenGLWidget):
             )
             self._init_uniforms()
         except Exception as e:
-            print(f"Shader compilation failed: {e}")
+            log.error(f"Shader compilation failed: {e}")
 
     def _init_uniforms(self):
         self.u_model = glGetUniformLocation(self.shader_program, "u_model")
@@ -110,7 +113,7 @@ class ModernMeshWidget(QOpenGLWidget):
             self.update()
             
         except Exception as e:
-            print(f"Error loading mesh: {e}")
+            log.error(f"Error loading mesh: {e}")
 
     def _load_texture_data(self, mesh):
         tex_img = None

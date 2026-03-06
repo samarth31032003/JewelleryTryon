@@ -4,6 +4,9 @@ import cv2
 import time
 from .base import TrackingStrategy
 from utils.smoothing import OneEuroFilter, RotationFilter
+from utils.logger import logger
+
+log = logger.bind(component="trackers")
 
 class HandState:
     """Helper to store memory for a specific hand"""
@@ -208,7 +211,7 @@ class WristStrategy(TrackingStrategy):
             except cv2.error:
                 # Catch the crash if solvePnP fails, reset state to be safe
                 state.last_valid_rvec = None
-                print(f"Warning: Tracking lost/reset for {label} hand")
+                log.warning(f"Warning: Tracking lost/reset for {label} hand")
 
         return render_commands
 

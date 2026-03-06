@@ -6,6 +6,9 @@ import hashlib
 import secrets
 from utils.paths import DB_PATH, resolve_path
 from model.models import JewelryItem
+from utils.logger import logger
+
+log = logger.bind(component="database")
 
 class JewelryDB:
     def __init__(self):
@@ -49,21 +52,21 @@ class JewelryDB:
         cursor.execute("PRAGMA table_info(jewelry)")
         columns = [info[1] for info in cursor.fetchall()]
         if "details" not in columns:
-            print("[DB] Migrating: Adding 'details' column...")
+            log.info("[DB] Migrating: Adding 'details' column...")
             cursor.execute("ALTER TABLE jewelry ADD COLUMN details TEXT DEFAULT ''")
         
         # Migrations for auth table
         cursor.execute("PRAGMA table_info(auth)")
         auth_columns = [info[1] for info in cursor.fetchall()]
         if "last_online" not in auth_columns:
-            print("[DB] Migrating: Adding license tracking columns to auth table...")
+            log.info("[DB] Migrating: Adding license tracking columns to auth table...")
             cursor.execute("ALTER TABLE auth ADD COLUMN last_online REAL")
             cursor.execute("ALTER TABLE auth ADD COLUMN last_seen REAL")
             cursor.execute("ALTER TABLE auth ADD COLUMN license_sig TEXT")
         
         # delete the db anyway.
         # if "image_2d_path" not in columns:
-        #     print("[DB] Migrating: Adding 'image_2d_path' column...")
+        #     log.info("[DB] Migrating: Adding 'image_2d_path' column...")
         #     cursor.execute("ALTER TABLE jewelry ADD COLUMN image_2d_path TEXT")
             
         self.conn.commit()
@@ -73,7 +76,7 @@ class JewelryDB:
         cursor = self.conn.cursor()
         cursor.execute("SELECT count(*) FROM auth")
         if cursor.fetchone()[0] == 0:
-            print("[DB] First run detected. Setting default password: 'admin'")
+            log.info("[DB] First run detected. Setting default password: 'admin'")
             self.set_password("admin")
 
     # --- SECURITY METHODS ---
@@ -134,7 +137,7 @@ class JewelryDB:
         
         expected_sig = self._generate_license_sig(last_online, last_seen, salt, hwid)
         if expected_sig != stored_sig:
-            print("[DB] Warning: License signature mismatch. Tampering detected.")
+            log.warning("[DB] Warning: License signature mismatch. Tampering detected.")
             return None
             
         return last_online, last_seen
@@ -155,9 +158,9 @@ class JewelryDB:
             json_str = json.dumps(settings_dict)
             cursor.execute('UPDATE jewelry SET settings = ? WHERE id = ?', (json_str, item_id))
             self.conn.commit()
-            print(f" [DB] Saved settings for Item {item_id}")
+            log.info(f" [DB] Saved settings for Item {item_id}")
         except Exception as e:
-            print(f" [DB] ERROR saving settings: {e}")
+            log.error(f" [DB] ERROR saving settings: {e}")
 
     def get_all_items(self):
         cursor = self.conn.cursor()

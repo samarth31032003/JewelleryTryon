@@ -15,6 +15,10 @@ from ui.tryon.window import TryOnWindow
 
 from utils.security import LicenseGuard
 from utils.paths import USER_DATA_ROOT
+from utils.logger import logger
+from PyQt5.QtCore import qInstallMessageHandler, QtDebugMsg, QtInfoMsg, QtWarningMsg, QtCriticalMsg, QtFatalMsg
+
+log = logger.bind(component="ui")
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -105,7 +109,7 @@ class MainApp(QMainWindow):
 
     def closeEvent(self, event):
         """Handle app closure cleanly."""
-        print("App closing: Saving state...")
+        log.info("App closing: Saving state...")
         if hasattr(self, 'tryon_screen'):
             self.tryon_screen.save_settings()
             self.tryon_screen.stop_session()
@@ -147,6 +151,28 @@ class LicenseErrorDialog(QDialog):
         self.btn_copy.setStyleSheet("padding: 10px; font-weight: bold; font-size: 13px; background-color: #dcfce7; color: #166534; border: 1px solid #166534;")
 
 if __name__ == "__main__":
+    
+    # GLOBAL CRASH HANDLERS
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        log.critical("Unhandled python exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = handle_exception
+
+    def qt_message_handler(mode, context, message):
+        if mode == QtDebugMsg:
+            log.debug(f"[Qt] {message}")
+        elif mode == QtInfoMsg:
+            log.info(f"[Qt] {message}")
+        elif mode == QtWarningMsg:
+            log.warning(f"[Qt] {message}")
+        elif mode in (QtCriticalMsg, QtFatalMsg):
+            log.critical(f"[Qt] {message}")
+
+    qInstallMessageHandler(qt_message_handler)
+
     app = QApplication(sys.argv)
 
     # This ensures unauthorized copies cannot even see the login screen

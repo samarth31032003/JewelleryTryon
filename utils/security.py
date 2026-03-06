@@ -5,6 +5,9 @@ import json
 import platform
 import time
 from model.database import JewelryDB
+from utils.logger import logger
+
+log = logger.bind(component="utils")
 # try-except so it doesn't crash on Linux
 try:
     import winreg
@@ -40,18 +43,18 @@ class LicenseGuard:
                 return "LINUX_DEV_ID"
         except Exception as e:
             # Added a print statement so it doesn't fail silently.
-            print(f"[License Guard Debug] HWID generation failed: {e}")
+            log.error(f"[License Guard Debug] HWID generation failed: {e}")
             return "UNKNOWN-HWID"
 
     @staticmethod
     def validate_license():
         """Checks the Cloudflare API to see if this HWID is active."""
         hwid = LicenseGuard.get_hwid()
-        print(f"Checking License for HWID: {hwid}")
+        log.info(f"Checking License for HWID: {hwid}")
         
         # Bypass for local Linux development
         # if hwid == "LINUX_DEV_ID": 
-        #     print("[License] Linux Dev Mode: Bypassing network check.")
+        #     log.info("[License] Linux Dev Mode: Bypassing network check.")
         #     return True        
         
         db = JewelryDB()
@@ -71,24 +74,24 @@ class LicenseGuard:
                 data = json.loads(response.read().decode())
                 
                 if data.get("status") == "active":
-                    print(f"[License] internet! Validated successfully for client: {data.get('client', 'Unknown')}")
+                    log.info(f"[License] internet! Validated successfully for client: {data.get('client', 'Unknown')}")
                     
                     # Update DB with current time for offline mode later
                     db.save_license_state(current_time, current_time, hwid)
                     db.close()
                     return True
                 
-                print("[License] internet! Blocked: License is revoked or unregistered.")
+                log.warning("[License] internet! Blocked: License is revoked or unregistered.")
                 db.close()
                 return False
                 
         except Exception as e:
             # If there's no internet or the API is unreachable, we check the offline grace period.
-            print(f"[License] no internet! Connection failed: {e}. Checking offline grace period...")
+            log.warning(f"[License] no internet! Connection failed: {e}. Checking offline grace period...")
             
             state = db.get_license_state(hwid)
             if not state:
-                print("[License] Offline Check Failed: Missing or tampered license state.")
+                log.error("[License] Offline Check Failed: Missing or tampered license state.")
                 db.close()
                 return False
                 
@@ -96,7 +99,7 @@ class LicenseGuard:
             
             # Time-Travel Check: Clock should not go backward
             if current_time < last_seen - 300: # 5 min tolerance for minor clock drift
-                print("[License] Offline Check Failed: System clock rewind detected.")
+                log.error("[License] Offline Check Failed: System clock rewind detected.")
                 db.close()
                 return False
                 
@@ -107,12 +110,12 @@ class LicenseGuard:
             days_offline = time_offline / (24 * 3600)
 
             if time_offline > three_days_sec:
-                print(f"[License] Offline Check Failed: Grace period expired ({days_offline:.1f} days offline).")
+                log.error(f"[License] Offline Check Failed: Grace period expired ({days_offline:.1f} days offline).")
                 db.close()
                 return False
                 
             # Valid offline session: update last_seen, keep last_online
-            print(f"[License] Offline Grace Period Valid. Updating last_seen timestamp.")
+            log.info(f"[License] Offline Grace Period Valid. Updating last_seen timestamp.")
             db.save_license_state(last_online, current_time, hwid)
             db.close()
             return True

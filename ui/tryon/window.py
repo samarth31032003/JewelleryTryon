@@ -19,9 +19,12 @@ from trackers.strategies.nose import NoseStrategy
 from trackers.strategies.ear import EarringStrategy
 from trackers.strategies.forehead import ForeheadStrategy
 from trackers.strategies.collection import CollectionStrategy
+from utils.logger import logger
 
 # --- CONFIG ---
 CAMERA_INDEX = 0
+
+log = logger.bind(component="ui")
 
 class TryOnWindow(QWidget): 
     # Signal to tell Main to switch screens
@@ -222,7 +225,7 @@ class TryOnWindow(QWidget):
         
         # SCENARIO 1: IT IS A COLLECTION (FOLDER)
         if path and os.path.isdir(path):
-            print(f"Loading Collection ({self.current_mode} mode): {path}")
+            log.info(f"Loading Collection ({self.current_mode} mode): {path}")
             found_parts = {}
             
             def classify_part(name):
@@ -270,10 +273,10 @@ class TryOnWindow(QWidget):
         # SCENARIO 2: SINGLE ITEM (NOT A FOLDER)
         else:
             if self.current_mode == "2d" and self.pending_item.image_2d_path:
-                print(f"Loading Single 2D Sprite: {self.pending_item.image_2d_path}")
+                log.info(f"Loading Single 2D Sprite: {self.pending_item.image_2d_path}")
                 self.viewer.load_quad(self.pending_item.image_2d_path, key='default')
             elif self.current_mode == "3d" and path:
-                print(f"Loading Single 3D Object: {path}")
+                log.info(f"Loading Single 3D Object: {path}")
                 self.viewer.load_object(path, key='default')
 
         self.pending_item = None

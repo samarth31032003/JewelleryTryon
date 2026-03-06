@@ -2,6 +2,9 @@
 import trimesh
 import numpy as np
 from PIL import Image
+from utils.logger import logger
+
+log = logger.bind(component="utils")
 
 class MeshData:
     """Simple container for raw mesh data"""
@@ -30,10 +33,10 @@ def load_mesh_data(path, is_occluder=False):
             mesh.vertices /= max_span  # Make it size 1.0
             mesh.vertices *= 5.0       # Scale up to size 5.0
 
-        print(f"Loaded {path}")
-        print(f"Original Bounds: {mesh.bounds}")
+        log.info(f"Loaded {path}")
+        log.info(f"Original Bounds: {mesh.bounds}")
         mesh.vertices -= mesh.centroid
-        print(f"New Bounds (Should be centered around 0): {mesh.bounds}")
+        log.info(f"New Bounds (Should be centered around 0): {mesh.bounds}")
         
         # 2. Extract Data
         verts = np.array(mesh.vertices, dtype=np.float32)
@@ -63,7 +66,7 @@ def load_mesh_data(path, is_occluder=False):
         return MeshData(verts, norms, uvs, faces, texture_bytes)
 
     except Exception as e:
-        print(f"Error loading mesh {path}: {e}")
+        log.error(f"Error loading mesh {path}: {e}")
         return None
     
 def create_2d_quad(aspect_ratio=1.0):

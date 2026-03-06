@@ -5,6 +5,9 @@ from .ear import EarringStrategy
 from .nose import NoseStrategy
 from .forehead import ForeheadStrategy
 from trackers.occluder_shared import OccluderManager
+from utils.logger import logger
+
+log = logger.bind(component="trackers")
 
 class CollectionStrategy(TrackingStrategy):
     def __init__(self):
@@ -83,7 +86,7 @@ class CollectionStrategy(TrackingStrategy):
                     # ensure strategy exists
                     if name != self.active_component and name in self.sub_strategies:
                         self.sub_strategies[name].settings.update(shared_update)
-                        # print(f"[Collection] Synced {shared_update} to {name}")
+                        # log.debug(f"[Collection] Synced {shared_update} to {name}")
 
     def get_slider_definitions(self):
         """

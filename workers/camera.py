@@ -4,6 +4,9 @@ import time
 import os
 from PyQt5.QtCore import QThread, pyqtSignal
 import numpy as np
+from utils.logger import logger
+
+log = logger.bind(component="camera")
 
 class CameraWorker(QThread):
     """
@@ -25,7 +28,7 @@ class CameraWorker(QThread):
 
     def run(self):
         """The main loop of the thread."""
-        print(f"[CameraWorker] Opening Camera {self.camera_index}...")
+        log.info(f"[CameraWorker] Opening Camera {self.camera_index}...")
         
         # Optimization: Use DirectShow on Windows for faster startup/switching
         self.cap = cv2.VideoCapture(self.camera_index)
@@ -36,13 +39,13 @@ class CameraWorker(QThread):
         self.cap.set(cv2.CAP_PROP_FPS, 30)
 
         if not self.cap.isOpened():
-            print("[CameraWorker] CRITICAL: Could not open camera.")
+            log.critical("[CameraWorker] Could not open camera.")
             return
 
         # 2. Check what resolution we ACTUALLY got (Adaptive Logic)
         real_w = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
         real_h = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        print(f"[CameraWorker] Camera Active @ {int(real_w)}x{int(real_h)}")
+        log.info(f"[CameraWorker] Camera Active @ {int(real_w)}x{int(real_h)}")
         
         # (This resolution is implicitly passed to the Viewer via the frame itself,
         # so the Viewer will automatically adjust its aspect ratio bars).
@@ -61,7 +64,7 @@ class CameraWorker(QThread):
             self.msleep(1)
 
         self.cap.release()
-        print("[CameraWorker] Camera released.")
+        log.info("[CameraWorker] Camera released.")
 
     def stop(self):
         """Safely stops the thread loop."""

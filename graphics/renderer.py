@@ -6,6 +6,9 @@ import os
 from OpenGL.GL import *
 from OpenGL.GL.shaders import compileProgram, compileShader
 from PyQt5.QtWidgets import QOpenGLWidget
+from utils.logger import logger
+
+log = logger.bind(component="ui")
 
 from graphics.shaders import *
 from utils.mesh_loader import load_mesh_data, create_2d_quad
@@ -73,7 +76,7 @@ class ARViewerWidget(QOpenGLWidget):
             self.prog_debug = compileProgram(compileShader(DEBUG_VS, GL_VERTEX_SHADER), compileShader(DEBUG_FS, GL_FRAGMENT_SHADER))
             self.prog_occ = compileProgram(compileShader(MESH_VS, GL_VERTEX_SHADER), compileShader(OCCLUDER_FS, GL_FRAGMENT_SHADER))
         except Exception as e:
-            print("Shader Compile Error:", e)
+            log.error(f"Shader Compile Error: {e}")
 
         # Cache Uniforms
         self.loc_m_model = glGetUniformLocation(self.prog_mesh, "u_model")
@@ -96,7 +99,7 @@ class ARViewerWidget(QOpenGLWidget):
         self.init_occluder_primitive()
         
         # --- 2. AUTO-LOAD OCCLUDERS (Context is guaranteed valid here) ---
-        print("[Renderer] Initializing Occluders...")
+        log.info("[Renderer] Initializing Occluders...")
         self.load_occluder(str(OCCLUDER_HEAD_PATH), "occ_head")
         self.load_occluder(str(OCCLUDER_BODY_PATH), "occ_body")
 
@@ -257,7 +260,7 @@ class ARViewerWidget(QOpenGLWidget):
                 
                 if not mesh_data:
                     # Optional: Print warning only once to avoid spam
-                    print(f"[Render] Warning: Request to draw {key} but mesh not loaded!") 
+                    log.warning(f"[Render] Warning: Request to draw {key} but mesh not loaded!") 
                     continue
                 glBindVertexArray(mesh_data['vao'])
                 glUniformMatrix4fv(glGetUniformLocation(self.prog_occ, "u_model"), 1, GL_TRUE, inst['matrix'])
@@ -352,19 +355,19 @@ class ARViewerWidget(QOpenGLWidget):
 
     def load_occluder(self, path, key):
         """Loads an occluder mesh and stores it separately."""
-        print(f"[Renderer] Attempting to load occluder: {key} from {path}")
+        log.info(f"[Renderer] Attempting to load occluder: {key} from {path}")
         
         if key in self.occluder_meshes:
-            print(f"[Renderer] Occluder {key} already loaded.")
+            log.info(f"[Renderer] Occluder {key} already loaded.")
             return
 
         # 1. Load Data
         data = load_mesh_data(path, is_occluder=True)
         if not data:
-            print(f"[Renderer] ❌ FAILED to load occluder: {path}")
+            log.error(f"[Renderer] ❌ FAILED to load occluder: {path}")
             return # <--- This is where it likely fails right now
 
-        print(f"[Renderer] ✔ Loaded {key}: {len(data.faces)} faces.")
+        log.info(f"[Renderer] ✔ Loaded {key}: {len(data.faces)} faces.")
 
         self.makeCurrent()
         interleaved = np.hstack((data.vertices, data.norms, data.uvs)).astype(np.float32)
@@ -408,14 +411,14 @@ class ARViewerWidget(QOpenGLWidget):
         Loads a 2D image and maps it onto a mathematically generated flat Quad.
         """
         if not image_path or not os.path.exists(image_path):
-            print(f"[Renderer] 2D Image not found: {image_path}")
+            log.warning(f"[Renderer] 2D Image not found: {image_path}")
             return
 
         # 1. Read Image & Calculate Aspect Ratio
         # IMREAD_UNCHANGED ensures we keep the Alpha (transparency) channel!
         img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if img is None:
-            print(f"[Renderer] Failed to decode 2D Image: {image_path}")
+            log.error(f"[Renderer] Failed to decode 2D Image: {image_path}")
             return
 
         h, w = img.shape[:2]
@@ -470,4 +473,4 @@ class ARViewerWidget(QOpenGLWidget):
 
         self.doneCurrent()
         self.update()
-        print(f"[Renderer] Loaded 2D Sprite '{key}' ({w}x{h})")
+        log.info(f"[Renderer] Loaded 2D Sprite '{key}' ({w}x{h})")

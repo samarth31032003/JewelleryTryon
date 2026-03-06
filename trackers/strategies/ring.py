@@ -4,6 +4,9 @@ import cv2
 import time
 from .base import TrackingStrategy
 from utils.smoothing import OneEuroFilter, RotationFilter
+from utils.logger import logger
+
+log = logger.bind(component="trackers")
 
 class HandState:
     def __init__(self):
@@ -215,7 +218,7 @@ class RingStrategy(TrackingStrategy):
                     render_commands.append({'type': 'occluder', 'matrix': mat_occ})
 
             except Exception as e:
-                # print(e)
+                # log.error(e)
                 pass
 
         return render_commands
