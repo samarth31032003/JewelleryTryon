@@ -3,6 +3,7 @@ import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QObject
 from trackers.pose_engine import PoseEngine
 from utils.logger import logger
+import traceback
 
 log = logger.bind(component="ai")
 
@@ -11,14 +12,19 @@ class AIWorker(QThread):
     Runs MediaPipe and Tracking Strategies in a background thread.
     Receives frames -> Calculates Matrices -> Emits Render Commands.
     """
-    # Signal: Emits (list_of_commands, is_face_detected)
     results_ready = pyqtSignal(list, bool)
+    frame_processed = pyqtSignal(np.ndarray) # Emits the composited frame
 
     def __init__(self):
         super().__init__()
         self.is_running = True
         self.latest_frame = None
         self.strategy = None
+        self.active_mode = "3d" # Default routing mode
+        
+        # Instantiate the 2D pipeline manager
+        from graphics.overlay_2d import CollectionManager2D
+        self.manager_2d = CollectionManager2D()
         
         # Mutex to prevent reading/writing frame at same time
         self.mutex = QMutex()
@@ -35,37 +41,63 @@ class AIWorker(QThread):
             self.ai_engine = PoseEngine()
 
         while self.is_running:
-            # 1. Get the latest frame safely
-            frame = None
-            self.mutex.lock()
-            if self.latest_frame is not None:
-                frame = self.latest_frame
-                self.latest_frame = None # Consume it
-            self.mutex.unlock()
+            try:
+                # 1. Get the latest frame safely
+                frame = None
+                self.mutex.lock()
+                if self.latest_frame is not None:
+                    frame = self.latest_frame
+                    self.latest_frame = None # Consume it
+                self.mutex.unlock()
 
-            # 2. Process if we have a frame AND a strategy
-            if frame is not None and self.strategy:
-                # Run MediaPipe
-                results = self.ai_engine.process(frame)
-                h, w, _ = frame.shape
-                
-                # Run Strategy Logic (Math)
-                self.settings_mutex.lock()
-                try:
-                    commands = self.strategy.process_frame(results, w, h)
-                except Exception as e:
-                    log.error(f"[AIWorker] Strategy Error: {e}")
+                # 2. Process if we have a frame AND (a strategy OR we are in 2D mode)
+                if frame is not None and (self.strategy or self.active_mode == '2d'):
+                    # Run MediaPipe
+                    results = self.ai_engine.process(frame)
+                    h, w, _ = frame.shape
+                    
+                    # Run Strategy Logic (Math) - Only if it exists (3D mode)
                     commands = []
-                self.settings_mutex.unlock()
+                    if self.strategy:
+                        self.settings_mutex.lock()
+                        try:
+                            commands = self.strategy.process_frame(results, w, h)
+                        except Exception as e:
+                            log.error(f"[AIWorker] Strategy Error: {e}")
+                        self.settings_mutex.unlock()
 
-                # Check if face was found
-                face_found = bool(results.face_landmarks)
+                    face_found = bool(results.face_landmarks)
+                    
+                    # Routing Logic
+                    if self.active_mode == '2d':
+                        try:
+                            # Flat 2D Mode: Compose the layout via OpenCV overlay
+                            composited = self.manager_2d.process_frame(frame, results, w, h)
+                            self.frame_processed.emit(composited)
+                            self.results_ready.emit([], face_found) # Empty 3D draw cmds
+                        except Exception as e:
+                            log.error(f"FATAL 2D ERROR: {e}")
+                            log.error(traceback.format_exc())
+                    else:
+                        try:
+                            # True 3D Mode: Emit original frame to background, compute 3D matrices
+                            self.frame_processed.emit(frame)
+                            self.results_ready.emit(commands, face_found)
+                        except Exception as e:
+                            log.error(f"FATAL 3D ERROR: {e}")
+                            log.error(traceback.format_exc())         
                 
-                # 3. Send results back to UI
-                self.results_ready.emit(commands, face_found)
+                # Sleep to prevent CPU hogging (1ms)
+                self.msleep(1)
             
-            # Sleep to prevent CPU hogging (1ms)
-            self.msleep(1)
+            except Exception as e:
+                # This will catch absolutely any error in the entire thread
+                log.error(f"🚨 FATAL AI THREAD CRASH: {e}")
+                log.error(traceback.format_exc())
+                
+                # Sleep for 1 second so it doesn't spam your logs 10,000 times a second
+                import time
+                time.sleep(1)           
 
         log.info("[AIWorker] Stopped.")
 
@@ -74,6 +106,28 @@ class AIWorker(QThread):
         self.mutex.lock()
         self.latest_frame = frame
         self.mutex.unlock()
+
+    def set_active_collection(self, items: list, mode: str):
+        """Prepares the AIWorker with new items depending on the mode."""
+        self.settings_mutex.lock()
+        self.active_mode = mode
+        
+        if mode == '2d':
+            self.manager_2d.clear()
+            for item in items:
+                if item.image_2d_path:
+                    # Parse final key from the path or name if it's a model
+                    # e.g "earring" "necklace"
+                    key_hint = item.name.lower() + " " + item.image_2d_path.lower()
+                    if "ear" in key_hint: key_real = "ear"
+                    elif "neck" in key_hint: key_real = "necklace"
+                    elif "nose" in key_hint: key_real = "nosepin"
+                    else: key_real = "forehead"  # Default fallback
+                    
+                    self.manager_2d.load_item(key_real, item.image_2d_path)
+            # We don't need the 3D strategy calculations
+            self.strategy = None
+        self.settings_mutex.unlock()
 
     def set_strategy(self, strategy):
         """Updates the active tracking strategy safely."""

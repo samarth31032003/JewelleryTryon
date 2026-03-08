@@ -4,6 +4,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLa
                              QScrollArea, QTabWidget, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from ui.styles import get_stylesheet
+from utils.logger import logger
+
+log = logger.bind(component="ui")
 
 class TryOnControls(QWidget):
     """
@@ -25,6 +28,7 @@ class TryOnControls(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
+        self.scene_sliders = {}
         self.setup_tabs()
 
     def setup_tabs(self):
@@ -85,6 +89,15 @@ class TryOnControls(QWidget):
         self.tab_scene = QWidget()
         scene_layout = QVBoxLayout(self.tab_scene)
         scene_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Reset Lighting Button
+        self.btn_reset_lighting = QPushButton("✨ Reset to Original Lighting")
+        self.btn_reset_lighting.setStyleSheet(
+            "QPushButton { background-color: transparent; border: 1px solid #7fa2ff; border-radius: 14px; color: #7fa2ff; padding: 8px; font-weight: bold; margin-bottom: 10px; }"
+            "QPushButton:hover { background-color: rgba(127, 162, 255, 0.1); }"
+        )
+        self.btn_reset_lighting.clicked.connect(self.reset_lighting_to_original)
+        scene_layout.addWidget(self.btn_reset_lighting)
         
         grp_cam = QGroupBox("Camera")
         cam_grid = QGridLayout(grp_cam)
@@ -178,6 +191,7 @@ class TryOnControls(QWidget):
         """Helper for Scene tab sliders."""
         l = QLabel(label)
         s = self._build_slider(min_v, max_v, def_v, key)
+        self.scene_sliders[key] = s
         
         btn_minus = self._round_button("–", lambda _=False, sl=s: sl.setValue(sl.value() - 1))
         btn_plus = self._round_button("+", lambda _=False, sl=s: sl.setValue(sl.value() + 1))
@@ -217,3 +231,12 @@ class TryOnControls(QWidget):
 
     def on_save_clicked(self):
         self.save_requested.emit()
+
+    def reset_lighting_to_original(self):
+        log.info("Resetting lighting to original unlit values.")
+        if "Light_Exp" in self.scene_sliders:
+            self.scene_sliders["Light_Exp"].setValue(10)
+        if "Light_Gam" in self.scene_sliders:
+            self.scene_sliders["Light_Gam"].setValue(10)
+        if "Light_Amb" in self.scene_sliders:
+            self.scene_sliders["Light_Amb"].setValue(100)

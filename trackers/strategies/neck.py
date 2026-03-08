@@ -92,20 +92,6 @@ class NeckStrategy(TrackingStrategy):
         now = time.time()
         roll_smooth = self.filter_roll.update(raw_roll, now)
 
-        # flat tracking
-        if getattr(self, 'mode', '3d') == "2d":
-            # Add user spin
-            user_spin = math.radians(self.settings.get("Rot_Z", 0))
-            
-            # 2D Scale adjustment
-            scale_2d = self.settings.get("Scale", 150) * 0.001 
-            
-            # 2D Offsets (reusing existing UI logic)
-            off_y = self.settings.get("Up_Down", 0) * 0.0001
-            
-            # Build flat matrix and return ONLY the image
-            mat_2d = self._build_2d_matrix(p_smooth, roll_smooth + user_spin, scale_2d, offset_y=off_y)
-            return [{'type': 'mesh', 'matrix': mat_2d}]
                 
         # 3d math.
         raw_yaw = math.atan2(dz, dx)

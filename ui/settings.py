@@ -1,3 +1,4 @@
+# ui/settings.py
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
 from model.database import JewelryDB
 from workers.camera import get_available_cameras

@@ -62,20 +62,6 @@ class NoseStrategy(TrackingStrategy):
         # Smoothing
         pos_smooth = self.filter_pos.update(pos_base, time.time())
 
-        # 2d flat tracking.
-        if getattr(self, 'mode', '3d') == "2d":
-            # Calculate 2D Roll using cheeks
-            dy = p_right_cheek[1] - p_left_cheek[1]
-            dx = p_right_cheek[0] - p_left_cheek[0]
-            roll_angle = math.atan2(dy, dx)
-            
-            user_spin = math.radians(self.settings.get("Rot_Z", 0))
-            scale_2d = self.settings.get("Scale", 150) * 0.001 
-            off_y = self.settings.get("Up_Down", 0) * 0.0001
-            
-            # The "Side" slider is already handled by your awesome pos_smooth interpolation above!
-            mat_2d = self._build_2d_matrix(pos_smooth, roll_angle + user_spin, scale_2d, offset_y=off_y)
-            return [{'type': 'mesh', 'matrix': mat_2d}]
         
         # --- 3. Calculate Head Rotation ---
         # Up: Bridge to Tip

@@ -11,7 +11,7 @@ from utils.logger import logger
 log = logger.bind(component="ui")
 
 from graphics.shaders import *
-from utils.mesh_loader import load_mesh_data, create_2d_quad
+from utils.mesh_loader import load_mesh_data
 from utils.paths import OCCLUDER_HEAD_PATH, OCCLUDER_BODY_PATH
 
 class ARViewerWidget(QOpenGLWidget):
@@ -405,72 +405,3 @@ class ARViewerWidget(QOpenGLWidget):
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, f)
         self.camera_ready = True; self.doneCurrent(); self.update()
-
-    def load_quad(self, image_path, key='default'):
-        """
-        Loads a 2D image and maps it onto a mathematically generated flat Quad.
-        """
-        if not image_path or not os.path.exists(image_path):
-            log.warning(f"[Renderer] 2D Image not found: {image_path}")
-            return
-
-        # 1. Read Image & Calculate Aspect Ratio
-        # IMREAD_UNCHANGED ensures we keep the Alpha (transparency) channel!
-        img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-        if img is None:
-            log.error(f"[Renderer] Failed to decode 2D Image: {image_path}")
-            return
-
-        h, w = img.shape[:2]
-        aspect_ratio = w / float(h)
-
-        # 2. Generate Flat Mesh
-        data = create_2d_quad(aspect_ratio)
-
-        self.makeCurrent()
-
-        # 3. Upload Mesh to GPU
-        # Flatten the arrays for OpenGL
-        interleaved = np.hstack((data.vertices, data.norms, data.uvs)).astype(np.float32)
-        flat_faces = data.faces.flatten()
-
-        vao = glGenVertexArrays(1); glBindVertexArray(vao)
-        vbo = glGenBuffers(1); glBindBuffer(GL_ARRAY_BUFFER, vbo)
-        glBufferData(GL_ARRAY_BUFFER, interleaved.nbytes, interleaved, GL_STATIC_DRAW)
-        
-        ebo = glGenBuffers(1); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, flat_faces.nbytes, flat_faces, GL_STATIC_DRAW)
-
-        stride = 32 # 3+3+2 floats * 4 bytes
-        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
-        glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(12))
-        glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(24))
-
-        # 4. Upload Texture to GPU
-        tex_id = glGenTextures(1)
-        glBindTexture(GL_TEXTURE_2D, tex_id)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-
-        # Handle color conversions (OpenCV loads as BGR/BGRA, OpenGL needs RGBA)
-        if len(img.shape) == 3 and img.shape[2] == 4:
-            img_gl = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
-        else:
-            # If the user uploaded a JPG without transparency, force an alpha channel
-            img_gl = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
-
-        # OpenGL expects the Y-axis to start at the bottom, so we flip vertically
-        img_gl = cv2.flip(img_gl, 0)
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_gl)
-
-        # 5. Store in dictionary
-        self.meshes[key] = {
-            'vao': vao,
-            'tex': tex_id,
-            'count': len(flat_faces) # Should be 6 indices (2 triangles)
-        }
-
-        self.doneCurrent()
-        self.update()
-        log.info(f"[Renderer] Loaded 2D Sprite '{key}' ({w}x{h})")

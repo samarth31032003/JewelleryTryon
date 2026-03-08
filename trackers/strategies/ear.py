@@ -64,30 +64,6 @@ class EarringStrategy(TrackingStrategy):
         
         cmds = []
 
-        # 2d flat tracking.
-        if getattr(self, 'mode', '3d') == "2d":
-            # Calculate 2D Roll using left and right sides of face
-            dy = p_right[1] - p_left[1]
-            dx = p_right[0] - p_left[0]
-            roll_angle = math.atan2(dy, dx)
-            
-            user_spin = math.radians(self.settings.get("Rot_Z", 0))
-            scale_2d = self.settings.get("Scale", 150) * 0.001 
-            
-            # Offsets
-            off_y = self.settings.get("Up_Down", 0) * 0.0001
-            side_off = self.settings.get("Side", 0) * 0.0001
-
-            # Left Earring
-            mat_L_2d = self._build_2d_matrix(pos_L, roll_angle + user_spin, scale_2d, offset_x=-side_off, offset_y=off_y)
-            cmds.append({'type': 'mesh', 'matrix': mat_L_2d})
-            
-            # Right Earring
-            mat_R_2d = self._build_2d_matrix(pos_R, roll_angle + user_spin, scale_2d, offset_x=side_off, offset_y=off_y)
-            cmds.append({'type': 'mesh', 'matrix': mat_R_2d})
-            
-            return cmds
-
         # Calculate Axes
         vec_up = p_top - p_tip; vec_up /= np.linalg.norm(vec_up)
         vec_right = p_right - p_left; vec_right /= np.linalg.norm(vec_right)

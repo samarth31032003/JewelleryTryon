@@ -122,6 +122,7 @@ class TryOnWindow(QWidget):
         
         # 2. AI -> UI
         self.ai_worker.results_ready.connect(self.on_ai_results)
+        self.ai_worker.frame_processed.connect(self.viewer.update_bg)
         
         # 3. Controls -> Logic
         self.controls.setting_changed.connect(self.on_setting_changed)
@@ -157,9 +158,15 @@ class TryOnWindow(QWidget):
 
     @pyqtSlot(np.ndarray)
     def on_frame_received(self, frame):
-        self.viewer.update_bg(frame)
+        # We NO LONGER update the renderer's background directly from the camera!
+        # The background is now updated by the AIWorker's frame_processed signal,
+        # which will contain the 2D composited image if we are in 2D mode,
+        # or just the raw frame if we are in 3D mode.
         if self.use_ai:
             self.ai_worker.process_frame(frame)
+        else:
+            # If AI is off, just show the raw frame
+            self.viewer.update_bg(frame)
 
     @pyqtSlot(list, bool)
     def on_ai_results(self, commands, face_found):
@@ -202,6 +209,18 @@ class TryOnWindow(QWidget):
 
         self.ai_worker.set_strategy(strategy)
         self.controls.rebuild_sliders(strategy)
+        
+        # We need to tell the AI Worker which mode to operate in,
+        # and give it the assets if it's a 2D collection
+        if self.current_mode == "2d":
+            if item.category == "Collection":
+                # Will load the folder in _process_pending_loads later
+                pass
+            else:
+                self.ai_worker.set_active_collection([item], "2d")
+        else:
+            # Tell AI worker we are in 3D mode
+            self.ai_worker.set_active_collection([], "3d")
         
         self.pending_item = item
         QTimer.singleShot(50, self._process_pending_loads)
@@ -256,15 +275,20 @@ class TryOnWindow(QWidget):
                         self.viewer.load_object(full_path, key=final_key)
                         
                     elif self.current_mode == "2d" and ext.endswith('.png'):
-                        # Optional safety: Avoid loading 3D texture maps as 2D sprites.
-                        # You can enforce that 2D sprites must have '2d' in the filename:
-                        # if '2d' not in fname.lower(): continue
-                        # extra security skipping currently.
-                        found_parts[final_key] = full_path
-                        self.viewer.load_quad(full_path, key=final_key)
+                        # Important: Build pseudo-items for the AIWorker CollectionManager2D
+                        class PseudoItem:
+                            def __init__(self, name, path):
+                                self.name = name
+                                self.image_2d_path = path
+                        
+                        found_parts[final_key] = PseudoItem(final_key, full_path)
        
-            # 3. Pass to Strategy
-            if isinstance(self.ai_worker.strategy, CollectionStrategy):
+            # 3. Pass to Strategy or 2D Manager
+            if self.current_mode == "2d":
+                log.info(f"Passing 2D sprites to AI Worker: {list(found_parts.keys())}")
+                items = list(found_parts.values())
+                self.ai_worker.set_active_collection(items, "2d")
+            elif isinstance(self.ai_worker.strategy, CollectionStrategy):
                 self.ai_worker.strategy.load_components(found_parts)
                 if self.pending_item.settings:
                     self.ai_worker.strategy.update_settings(self.pending_item.settings)
@@ -273,8 +297,8 @@ class TryOnWindow(QWidget):
         # SCENARIO 2: SINGLE ITEM (NOT A FOLDER)
         else:
             if self.current_mode == "2d" and self.pending_item.image_2d_path:
-                log.info(f"Loading Single 2D Sprite: {self.pending_item.image_2d_path}")
-                self.viewer.load_quad(self.pending_item.image_2d_path, key='default')
+                log.info(f"Loading Single 2D Sprite into AI Worker: {self.pending_item.image_2d_path}")
+                # We already loaded it in `set_active_item`, nothing more to do here for renderer.
             elif self.current_mode == "3d" and path:
                 log.info(f"Loading Single 3D Object: {path}")
                 self.viewer.load_object(path, key='default')
