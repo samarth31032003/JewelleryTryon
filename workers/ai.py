@@ -22,9 +22,11 @@ class AIWorker(QThread):
         self.strategy = None
         self.active_mode = "3d" # Default routing mode
         
-        # Instantiate the 2D pipeline manager
+        # Instantiate the 2D pipeline manager and structural strategy
         from graphics.overlay_2d import CollectionManager2D
+        from trackers.strategies.strategy_2d import Strategy2D
         self.manager_2d = CollectionManager2D()
+        self.strategy_2d = Strategy2D(self.manager_2d)
         
         # Mutex to prevent reading/writing frame at same time
         self.mutex = QMutex()
@@ -125,8 +127,8 @@ class AIWorker(QThread):
                     else: key_real = "forehead"  # Default fallback
                     
                     self.manager_2d.load_item(key_real, item.image_2d_path)
-            # We don't need the 3D strategy calculations
-            self.strategy = None
+            # Inject the 2D Strategy so TryOnControls builds the sliders
+            self.strategy = self.strategy_2d
         self.settings_mutex.unlock()
 
     def set_strategy(self, strategy):
@@ -137,9 +139,10 @@ class AIWorker(QThread):
 
     def update_settings(self, new_settings):
         """Updates slider values safely."""
+        log.warning(f"🚨 [TRIPWIRE 1] AIWorker received: {new_settings}")
+        
         self.settings_mutex.lock()
         if self.strategy:
-            # Handle CollectionStrategy vs Standard Strategy
             if hasattr(self.strategy, 'update_settings'):
                 self.strategy.update_settings(new_settings)
             else:

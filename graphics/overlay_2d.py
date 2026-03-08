@@ -16,6 +16,7 @@ class BaseOverlay2D:
         self.scale = 1.0
         self.offset_x = 0
         self.offset_y = 0
+        self.brightness = 1.0
         
         if image_path and os.path.exists(image_path):
             self.load_image(image_path)
@@ -48,6 +49,15 @@ class BaseOverlay2D:
             self.cached_size = target_size
         return self.cached_image.copy()
 
+    def _apply_brightness(self, overlay):
+        if self.brightness == 1.0: return overlay
+        alpha = overlay[:, :, 3] if overlay.shape[2] == 4 else None
+        bgr = overlay[:, :, :3]
+        bgr = cv2.convertScaleAbs(bgr, alpha=self.brightness, beta=0)
+        if alpha is not None:
+            return cv2.merge((bgr[:,:,0], bgr[:,:,1], bgr[:,:,2], alpha))
+        return bgr
+
     def _alpha_blend(self, background, overlay, x, y):
         bg_h, bg_w = background.shape[:2]
         ol_h, ol_w = overlay.shape[:2]
@@ -75,6 +85,39 @@ class BaseOverlay2D:
         
         return background
 
+    def prepare_and_blend(self, frame, center_x, anchor_y, base_size, head_tilt=0, side_flip=False, y_anchor='center'):
+        """
+        Unified 2D pipeline: handles resize relative to aspect, rotation, brightness, offset application, and alpha blending.
+        """
+        if self.original_image is None: return frame
+        
+        oh, ow = self.original_image.shape[:2]
+        aspect = ow / oh if oh > 0 else 1
+        new_w, new_h = int(base_size * aspect), int(base_size)
+        
+        overlay = self._get_resized((new_w, new_h))
+        if overlay is None: return frame
+            
+        if side_flip:
+            overlay = cv2.flip(overlay, 1)
+            
+        if abs(head_tilt) > 2:
+            center = (new_w // 2, new_h // 2)
+            rot_mat = cv2.getRotationMatrix2D(center, -head_tilt, 1.0)
+            overlay = cv2.warpAffine(overlay, rot_mat, (new_w, new_h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+            
+        overlay = self._apply_brightness(overlay)
+        
+        final_x = int(center_x - new_w // 2 + self.offset_x)
+        if y_anchor == 'top':
+            final_y = int(anchor_y + self.offset_y)
+        elif y_anchor == 'necklace':
+            final_y = int(anchor_y - new_h // 3 + self.offset_y)
+        else: # center
+            final_y = int(anchor_y - new_h // 2 + self.offset_y)
+            
+        return self._alpha_blend(frame, overlay, final_x, final_y)
+
 
 class ForeheadPendantOverlay(BaseOverlay2D):
     def overlay_on_frame(self, frame, forehead_center, face_width=None, head_tilt=0):
@@ -83,22 +126,7 @@ class ForeheadPendantOverlay(BaseOverlay2D):
         base_size = int(face_width * 0.25 * self.scale) if face_width else int(80 * self.scale)
         base_size = max(30, min(400, base_size))
         
-        oh, ow = self.original_image.shape[:2]
-        aspect = ow / oh if oh > 0 else 1
-        new_w, new_h = int(base_size * aspect), base_size
-        
-        pendant = self._get_resized((new_w, new_h))
-        if pendant is None: return frame
-            
-        if abs(head_tilt) > 2:
-            center = (new_w // 2, new_h // 2)
-            rot_mat = cv2.getRotationMatrix2D(center, -head_tilt, 1.0)
-            pendant = cv2.warpAffine(pendant, rot_mat, (new_w, new_h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-                                     
-        x = forehead_center[0] - new_w // 2 + self.offset_x
-        y = forehead_center[1] - new_h // 2 + self.offset_y
-        
-        return self._alpha_blend(frame, pendant, x, y)
+        return self.prepare_and_blend(frame, forehead_center[0], forehead_center[1], base_size, head_tilt=head_tilt, y_anchor='center')
 
 
 class EarringOverlay(BaseOverlay2D):
@@ -113,24 +141,14 @@ class EarringOverlay(BaseOverlay2D):
         base_size = int(face_width * 0.25 * self.scale) if face_width else int(60 * self.scale)
         base_size = max(20, min(300, base_size))
         
-        oh, ow = self.original_image.shape[:2]
-        aspect = ow / oh if oh > 0 else 1
-        new_w, new_h = int(base_size * aspect), base_size
-        
         if left_ear:
-            earring_left = self._get_resized((new_w, new_h))
-            if earring_left is not None:
-                x = left_ear[0] - new_w // 2 + self.offset_x
-                y = left_ear[1] + self.offset_y
-                frame = self._alpha_blend(frame, earring_left, x, y)
+            frame = self.prepare_and_blend(frame, left_ear[0], left_ear[1], base_size, y_anchor='top')
                 
         if right_ear:
-            earring_right = self._get_resized((new_w, new_h))
-            if earring_right is not None:
-                if self.mirror_right: earring_right = cv2.flip(earring_right, 1)
-                x = right_ear[0] - new_w // 2 - self.offset_x
-                y = right_ear[1] + self.offset_y
-                frame = self._alpha_blend(frame, earring_right, x, y)
+            old_ox = self.offset_x
+            self.offset_x = -old_ox # Invert X offset for right ear
+            frame = self.prepare_and_blend(frame, right_ear[0], right_ear[1], base_size, side_flip=self.mirror_right, y_anchor='top')
+            self.offset_x = old_ox
                 
         return frame
 
@@ -146,24 +164,7 @@ class NosePinOverlay(BaseOverlay2D):
         base_size = int(face_width * 0.08 * self.scale) if face_width else int(25 * self.scale)
         base_size = max(10, min(100, base_size))
         
-        oh, ow = self.original_image.shape[:2]
-        aspect = ow / oh if oh > 0 else 1
-        new_w, new_h = int(base_size * aspect), base_size
-        
-        nosepin = self._get_resized((new_w, new_h))
-        if nosepin is None: return frame
-            
-        if self.side == "right": nosepin = cv2.flip(nosepin, 1)
-            
-        if abs(head_tilt) > 2:
-            center = (new_w // 2, new_h // 2)
-            rot_mat = cv2.getRotationMatrix2D(center, -head_tilt, 1.0)
-            nosepin = cv2.warpAffine(nosepin, rot_mat, (new_w, new_h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-                                     
-        x = nose_point[0] - new_w // 2 + self.offset_x
-        y = nose_point[1] - new_h // 2 + self.offset_y
-        
-        return self._alpha_blend(frame, nosepin, x, y)
+        return self.prepare_and_blend(frame, nose_point[0], nose_point[1], base_size, head_tilt=head_tilt, side_flip=(self.side=="right"), y_anchor='center')
 
 
 class NecklaceOverlay(BaseOverlay2D):
@@ -181,7 +182,9 @@ class NecklaceOverlay(BaseOverlay2D):
         try:
             h, w = frame.shape[:2]
             shoulder_width = abs(right_shoulder[0] - left_shoulder[0])
+            if shoulder_width < 10: return frame
             
+            # Decoupled scaling dependency on face_lms when missing
             depth_scale = (face_width / self.reference_face_width) if face_width else (shoulder_width / 300.0)
                 
             base_width = int(shoulder_width * 1.2 * self.scale * depth_scale)
@@ -208,6 +211,8 @@ class NecklaceOverlay(BaseOverlay2D):
             
             if self.enable_occlusion and chin_point is not None:
                 necklace = self._apply_occlusion(necklace, pos_x, pos_y, chin_point, neck_points, shoulder_center_y)
+                
+            necklace = self._apply_brightness(necklace)
                                                   
             frame = self._alpha_blend(frame, necklace, pos_x, pos_y)
             
@@ -216,7 +221,6 @@ class NecklaceOverlay(BaseOverlay2D):
             
         return frame
 
-    # Keep all the existing math operations exactly the same
     def _apply_perspective(self, necklace, left_shoulder, right_shoulder, head_pose=None):
         nl_h, nl_w = necklace.shape[:2]
         dx, dy = right_shoulder[0] - left_shoulder[0], right_shoulder[1] - left_shoulder[1]
@@ -306,6 +310,13 @@ class CollectionManager2D:
             
     def clear(self):
         self.overlays = {}
+
+    def update_settings(self, scale, offset_x, offset_y, brightness):
+        for overlay in self.overlays.values():
+            overlay.scale = scale
+            overlay.offset_x = offset_x
+            overlay.offset_y = offset_y
+            overlay.brightness = brightness
         
     def process_frame(self, frame, results, w, h):
         """Cleanly unpacks landmarks and routes them to active overlays."""
