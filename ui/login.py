@@ -42,7 +42,7 @@ class LoginWindow(QWidget):
         card_layout.setSpacing(20)
 
         # Top brand line
-        brand = QLabel("Sringar Jewellers")
+        brand = QLabel("Aspiron IT solution")
         brand.setAlignment(Qt.AlignCenter)
         brand.setStyleSheet("color: #d4af37; letter-spacing: 2px; font-weight: 700;")
         card_layout.addWidget(brand)
@@ -109,7 +109,7 @@ class LoginWindow(QWidget):
         card_layout.addStretch()
 
         # Offline / version footer below card
-        footer = QLabel("Offline Mode    ·    v2.4.0")
+        footer = QLabel("Offline Mode")
         footer.setAlignment(Qt.AlignCenter)
         footer.setStyleSheet("color: #5f7396; letter-spacing: 0.3px;")
 
