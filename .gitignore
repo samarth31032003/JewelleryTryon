@@ -24,9 +24,8 @@ __pycache__
 mesh_viewer_modern.py
 
 # build specific
-installer_script.iss
 dist
 build
 main.spec
 Output
-app.log
+swapper.py
