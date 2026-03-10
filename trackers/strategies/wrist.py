@@ -11,14 +11,12 @@ log = logger.bind(component="trackers")
 class HandState:
     """Helper to store memory for a specific hand"""
     def __init__(self):
-        # Increase smoothing to reduce jitter
-        self.filter_rvec = RotationFilter(min_cutoff=0.3, beta=0.5)
-        self.filter_tvec = OneEuroFilter(min_cutoff=0.2, beta=0.4)
+        # High Beta = Fast response when moving. High min_cutoff = No jitter when resting.
+        self.filter_rvec = RotationFilter(min_cutoff=0.4, beta=0.8)
+        self.filter_tvec = OneEuroFilter(min_cutoff=0.5, beta=0.7)
         self.last_valid_rvec = None
         self.last_valid_tvec = None
         self.last_seen_time = 0
-        self.stable_rvec = None
-        self.stable_tvec = None
 
 class WristStrategy(TrackingStrategy):
     def __init__(self):
@@ -38,7 +36,6 @@ class WristStrategy(TrackingStrategy):
         self.states = {"Left": HandState(), "Right": HandState()}
         
         # Initialize Default Settings
-        # These match the sliders defined below
         self.settings = {
             "Scale": 100,
             "Slide": 0,
@@ -50,42 +47,28 @@ class WristStrategy(TrackingStrategy):
         }
 
     def get_slider_definitions(self):
-        # Key, Label, Min, Max, Default, ScaleFactor
         return [
             ("Scale", "Size", 1, 500, 100, 0.01),
             ("Slide", "Position", -500, 500, 0, 0.5),
             ("Rot_X", "Tilt X", -180, 180, 0, 1.0),
             ("Rot_Y", "Tilt Y", -180, 180, 0, 1.0),
             ("Rot_Z", "Spin", -180, 180, 0, 1.0),
-            # OCCLUDER CONTROLS (Merged!)
             ("Occ_Radius", "Mask Thick", 50, 200, 100, 0.01),
             ("Occ_Len", "Mask Length", 50, 150, 100, 0.01)
         ]
     
     def _get_capsule_matrix(self, point_a, point_b, radius_scale=1.0):
-        """
-        Creates a matrix that stretches a unit cylinder from Point A to Point B.
-        point_a, point_b: (3,) numpy arrays (Coordinates in Camera Space)
-        """
-        # 1. Vector from A to B
         vec = point_b - point_a
         length = np.linalg.norm(vec)
         if length < 1e-6: return np.eye(4)
 
-        # 2. Scale Matrix
-        # Scale X/Z by radius, Scale Y by length
-        # Base radius is arbitrary, we tune it with radius_scale
-        radius = length * 0.15 * radius_scale # Heuristic: Arm is ~15% as thick as it is long
+        radius = length * 0.15 * radius_scale
         S = np.diag([radius, length, radius, 1.0])
 
-        # 3. Rotation Matrix (Align Y-axis to Vector)
-        # We want to rotate (0,1,0) to match 'vec' direction
         y_axis = np.array([0, 1, 0], dtype=np.float64)
         target_dir = vec / length
         
-        # Axis-Angle rotation logic
         rot_axis = np.cross(y_axis, target_dir)
-        # rot_angle = np.arccos(np.dot(y_axis, target_dir)) # is it right?
         rot_angle = np.arccos(np.clip(np.dot(y_axis, target_dir), -1.0, 1.0))
         
         if np.linalg.norm(rot_axis) < 1e-6:
@@ -94,15 +77,10 @@ class WristStrategy(TrackingStrategy):
             rot_axis /= np.linalg.norm(rot_axis)
             R, _ = cv2.Rodrigues(rot_axis * rot_angle)
 
-        # 4. Translation (Move to Start Point A)
         T = np.eye(4)
         T[:3, 3] = point_a
 
-        # 5. Build Final Matrix
-        # M = Translate * Rotate * Scale
         M_rot = np.eye(4); M_rot[:3, :3] = R
-        
-        # Convert to GL Coords at the very end
         cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
         
         return cv_to_gl @ T @ M_rot @ S
@@ -114,22 +92,18 @@ class WristStrategy(TrackingStrategy):
         if not results.pose_landmarks: 
             return []
 
-        # 1. Identify Candidates
         candidates = []
         if results.left_hand_landmarks:
             candidates.append((results.left_hand_landmarks, 13, self.model_right, "Right"))
         if results.right_hand_landmarks:
             candidates.append((results.right_hand_landmarks, 14, self.model_left, "Left"))
 
-        # 2. Process Each Hand
         for hand_lms, elbow_idx, model_3d, label in candidates:
             state = self.states[label]
             
-            # --- Check Timeout (Reset if hand was lost for > 1 sec) ---
             if time.time() - state.last_seen_time > 1.0:
                 state.last_valid_rvec = None
 
-            # --- Tracking Logic (Same as before) ---
             wrist = self._get_px(hand_lms.landmark[0], w, h)
             index = self._get_px(hand_lms.landmark[5], w, h)
             pinky = self._get_px(hand_lms.landmark[17], w, h)
@@ -153,24 +127,15 @@ class WristStrategy(TrackingStrategy):
 
                 if success:
                     now = time.time()
+                    # Directly use the high-quality EuroFilter values without lagging them!
                     rvec_s = state.filter_rvec.update(rvec.flatten(), now)
                     tvec_s = state.filter_tvec.update(tvec.flatten(), now).reshape(3,1)
+                    
                     state.last_valid_rvec = rvec_s
                     state.last_valid_tvec = tvec_s
-                    # Extra temporal blend for stability
-                    blend = 0.15
-                    if state.stable_rvec is None:
-                        state.stable_rvec = rvec_s
-                    else:
-                        state.stable_rvec = state.stable_rvec * (1 - blend) + rvec_s * blend
-                    if state.stable_tvec is None:
-                        state.stable_tvec = tvec_s
-                    else:
-                        state.stable_tvec = state.stable_tvec * (1 - blend) + tvec_s * blend
                     state.last_seen_time = now
                     
-                    # --- NEW: Generate 4x4 Matrices Internally ---
-                    mat_jewel = self._compute_matrix(state.stable_rvec, state.stable_tvec, is_occluder=False)
+                    mat_jewel = self._compute_matrix(rvec_s, tvec_s, is_occluder=False)
                     
                     render_commands.append({
                         'type': 'mesh', 
@@ -178,63 +143,45 @@ class WristStrategy(TrackingStrategy):
                         'info': f"{label} Hand"
                     })
         
-                    # 1. Reconstruct 3D points of Wrist and Elbow in Camera Space
-                    # We have tvec (Wrist Position). We need Elbow.
-                    # Since we used PnP, we can just project the 3D Model points using the rvec/tvec!
-                    
-                    # Get the 3D coordinates of the model joints
-                    # Index 0 = Wrist, Index 4 = Elbow (in our self.model_right array)
-                    R_mat, _ = cv2.Rodrigues(state.stable_rvec)
-                    t_vec = state.stable_tvec.flatten()
+                    R_mat, _ = cv2.Rodrigues(rvec_s)
+                    t_vec = tvec_s.flatten()
                     
                     p_wrist = (R_mat @ self.model_right[0]) + t_vec
                     p_elbow = (R_mat @ self.model_right[4]) + t_vec
                     
-                    # 2. Calculate Capsule Matrix
                     rad_scale = self.settings.get("Occ_Radius", 100) / 100.0
-
-                    # We extend it slightly past the elbow to be safe
                     p_elbow_ext = p_wrist + (p_elbow - p_wrist) * 1.1 
                     len_scale = self.settings.get("Occ_Len", 100) / 100.0
-                    
-                    # Apply Length Scale to the endpoint
                     p_pip_extended = p_wrist + (p_elbow_ext - p_wrist) * len_scale
 
                     mat_occ = self._get_capsule_matrix(p_wrist, p_pip_extended, radius_scale=1.0 * rad_scale)
                     
-                    # 3. Add to commands
                     render_commands.append({
                         'type': 'occluder',
                         'matrix': mat_occ
                     })
 
             except cv2.error:
-                # Catch the crash if solvePnP fails, reset state to be safe
                 state.last_valid_rvec = None
                 log.warning(f"Warning: Tracking lost/reset for {label} hand")
 
         return render_commands
 
     def _compute_matrix(self, rvec, tvec, is_occluder=False):
-        """Converts rvec/tvec + Settings -> 4x4 OpenGL Matrix"""
-        # 1. Base Pose (OpenCV)
         R, _ = cv2.Rodrigues(rvec)
         T_base = np.eye(4, dtype=np.float32)
         T_base[:3, :3] = R
         T_base[:3, 3] = tvec.flatten()
 
-        # 2. Coord Swap (CV -> GL)
         cv_to_gl = np.array([[1,0,0,0], [0,-1,0,0], [0,0,-1,0], [0,0,0,1]], dtype=np.float32)
         
-        # 3. Apply Sliders (Scale, Slide, Rotate)
         s_val = self.settings.get("Scale", 100) * 0.01
         S = np.diag([s_val, s_val, s_val, 1.0]).astype(np.float32)
 
         slide_dist = self.settings.get("Slide", 0) * 0.5 if not is_occluder else 0
         T_slide = np.eye(4, dtype=np.float32)
-        T_slide[:3, 3] = [0, slide_dist, 0] # Y-Axis Slide for Bracelets
+        T_slide[:3, 3] = [0, slide_dist, 0]
 
-        # Manual Rotations
         rx = np.radians(self.settings.get("Rot_X", 0))
         ry = np.radians(self.settings.get("Rot_Y", 0))
         rz = np.radians(self.settings.get("Rot_Z", 0))
@@ -248,7 +195,6 @@ class WristStrategy(TrackingStrategy):
             return M
         M_rot = make_rot(rx,0) @ make_rot(ry,1) @ make_rot(rz,2)
 
-        # Order: Scale -> UserRot -> Slide -> BodyPose -> FixCoords
         return cv_to_gl @ T_base @ T_slide @ M_rot @ S if not is_occluder else cv_to_gl @ T_base @ S
 
     def _get_px(self, lm, w, h):

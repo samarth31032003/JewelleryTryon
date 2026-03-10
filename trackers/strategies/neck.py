@@ -10,14 +10,8 @@ from trackers.occluder_shared import OccluderManager
 class NeckStrategy(TrackingStrategy):
     def __init__(self):
         super().__init__()
-        # 1. Position Smoother (Center of Necklace)
+        # Smooth the center position to prevent jitter
         self.filter_pos = OneEuroFilter(min_cutoff=0.5, beta=0.5)
-        
-        # 2. Angle Smoothers (The "Steadicam")
-        # We smooth the Angles directly, not the vectors.
-        # This prevents the "Shaking" when MediaPipe flickers.
-        self.filter_yaw = OneEuroFilter(min_cutoff=0.1, beta=2.0)
-        self.filter_roll = OneEuroFilter(min_cutoff=0.1, beta=2.0)
         
         self.settings = {
             "Scale": 150,      
@@ -41,9 +35,13 @@ class NeckStrategy(TrackingStrategy):
             ("Rot_Y", "Tilt Y", -180, 180, 0, 1.0),
             ("Rot_Z", "Spin", -180, 180, 0, 1.0),
         ]
-        # MUST BE BODY SLIDERS
+        
+        # Only draw occluder sliders if we are in 3D mode
         if getattr(self, 'mode', '3d') == "3d":
-            sliders.extend(OccluderManager.get_body_sliders())
+            if hasattr(OccluderManager, 'get_body_sliders'):
+                sliders.extend(OccluderManager.get_body_sliders())
+            elif hasattr(OccluderManager, 'get_shared_sliders'):
+                sliders.extend(OccluderManager.get_shared_sliders())
         return sliders
 
     def process_frame(self, results, w, h):
@@ -57,63 +55,41 @@ class NeckStrategy(TrackingStrategy):
         
         if lm_l.visibility < 0.5 or lm_r.visibility < 0.5: return []
 
-        # 1. Pixel Coordinates
+        # 1. Pixel Coordinates (Ultra Stable)
         px_l = np.array(self._get_px(lm_l, w, h))
         px_r = np.array(self._get_px(lm_r, w, h))
         
-        # 2. Independent Depth Calculation
-        Z_BASE = 0.5 
-        # REDUCED INTENSITY: 0.3 is the sweet spot. 
-        # 0.5 was swinging too wide. 0.3 is tighter.
-        Z_INTENSITY = 0.3 
+        # 2. Estimate Depth (Z) based purely on 2D pixel width
+        REAL_SHOULDER_WIDTH = 0.40
+        px_width = np.linalg.norm(px_l - px_r)
+        if px_width < 10: return []
         
-        z_l = Z_BASE + (lm_l.z * Z_INTENSITY)
-        z_r = Z_BASE + (lm_r.z * Z_INTENSITY)
+        f = self.camera_matrix[0,0]
+        z_est = (f * REAL_SHOULDER_WIDTH) / px_width
         
-        # 3. Get 3D Points
-        p_l = self._unproject(px_l, z_l)
-        p_r = self._unproject(px_r, z_r)
+        # 3. Get 3D Points using identical Z for both shoulders (Removes yaw jitter entirely)
+        p_l = self._unproject(px_l, z_est)
+        p_r = self._unproject(px_r, z_est)
         
-        # 4. Smooth Position (Neck Base)
         p_center = (p_l + p_r) / 2.0
         p_smooth = self.filter_pos.update(p_center, time.time())
         
-        # 5. ANGLE-BASED TRACKING (The Fix)
-        # Instead of Vector Cross Products (which shake), we calculate Euler Angles.
+        # 4. Construct Rotation Matrix (Pure 2D Chest Plane)
+        vec_x = p_r - p_l
+        vec_x /= np.linalg.norm(vec_x)
         
-        # Vector from Left Shoulder to Right Shoulder
-        vec = p_r - p_l
-        dx, dy, dz = vec[0], vec[1], vec[2]
+        vec_cam_fwd = np.array([0, 0, 1], dtype=np.float32)
+        vec_y = np.cross(vec_cam_fwd, vec_x) 
+        vec_y /= np.linalg.norm(vec_y)
         
-        # Roll (Tilting Head Sideways): Rotation around Z-axis (XY plane)
-        raw_roll = math.atan2(dy, dx)
+        vec_z = np.cross(vec_x, vec_y)
         
-        # Smooth the Angles
-        now = time.time()
-        roll_smooth = self.filter_roll.update(raw_roll, now)
+        R_chest = np.eye(4, dtype=np.float32)
+        R_chest[:3, 0] = vec_x
+        R_chest[:3, 1] = vec_y 
+        R_chest[:3, 2] = vec_z
 
-                
-        # 3d math.
-        raw_yaw = math.atan2(dz, dx)
-        yaw_smooth = self.filter_yaw.update(raw_yaw, now)
-        
-        # Reconstruct Rotation Matrix from Smoothed Angles
-        # We construct the "Shoulder Rotation" matrix manually
-        # Y-Axis Rotation (Yaw)
-        cy, sy = math.cos(yaw_smooth), math.sin(yaw_smooth)
-        Ry = np.eye(4, dtype=np.float32)
-        Ry[:3, :3] = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]]
-        
-        # Z-Axis Rotation (Roll)
-        cr, sr = math.cos(roll_smooth), math.sin(roll_smooth)
-        Rz = np.eye(4, dtype=np.float32)
-        Rz[:3, :3] = [[cr, -sr, 0], [sr, cr, 0], [0, 0, 1]]
-        
-        # Combine: First Yaw (Turn), then Roll (Tilt)
-        R_chest = Ry @ Rz
-
-        # 6. Build Matrices
-        
+        # 5. Build Matrices
         # A. Necklace (Jewelry)
         mat_jewel = self._build_matrix(p_smooth, R_chest)
         render_commands.append({'type': 'mesh', 'matrix': mat_jewel})
@@ -140,7 +116,7 @@ class NeckStrategy(TrackingStrategy):
         T_offset[2, 3] = fwd_back
 
         # --- ROTATION FIX ---
-        # "Gravity Slope" Method (Method A)
+        # "Gravity Slope" default rotation
         base_x = -125
         base_y = 0
         base_z = 180
