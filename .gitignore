@@ -30,3 +30,4 @@ build
 main.spec
 Output
 app.log
+swapper.py
