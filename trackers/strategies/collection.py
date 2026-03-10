@@ -31,8 +31,21 @@ class CollectionStrategy(TrackingStrategy):
     def mode(self, val):
         self._mode = val
         # When mode changes, broadcast it to all active child strategies!
-        for strat in self.sub_strategies.values():
-            strat.mode = val
+        if hasattr(self, 'sub_strategies') and self.sub_strategies:
+            for strat in self.sub_strategies.values():
+                strat.mode = val
+    # settings aggregator for 3d collection. for persistan sliders
+    @property
+    def settings(self):
+        """Gathers all sub-strategy settings into one dictionary for the Database."""
+        if hasattr(self, 'sub_strategies') and self.sub_strategies:
+            # Bundles it like: {"ear": {"Scale": 150}, "neck": {"Scale": 120}}
+            return {key: strat.settings for key, strat in self.sub_strategies.items()}
+        return {}
+
+    @settings.setter
+    def settings(self, val):
+        pass # Prevents crashes when the base class tries to initialize an empty dict
 
     def load_components(self, parts_dict):
         """

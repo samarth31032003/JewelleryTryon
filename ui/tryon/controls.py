@@ -28,6 +28,7 @@ class TryOnControls(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
+        self.dynamic_sliders = {}
         self.scene_sliders = {}
         self.setup_tabs()
 
@@ -125,7 +126,22 @@ class TryOnControls(QWidget):
             item = self.slider_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
 
+        self.dynamic_sliders.clear()        
         if not strategy: return
+        # If it's a 2D strategy, disable the Scene tab (index 1). Otherwise, enable it.
+        # Disable Scene Tab if in 2D Mode
+        is_2d = getattr(strategy, 'mode', '') == '2d'
+        self.tabs.setTabEnabled(1, not is_2d)
+
+        # --- NEW RESET BUTTON FOR 2D ---   
+        if is_2d:
+            btn_reset_2d = QPushButton("✨ Reset Original Brightness")
+            btn_reset_2d.setStyleSheet(
+                "QPushButton { background-color: transparent; border: 1px solid #7fa2ff; border-radius: 14px; color: #7fa2ff; padding: 8px; font-weight: bold; margin-bottom: 10px; }"
+                "QPushButton:hover { background-color: rgba(127, 162, 255, 0.1); }"
+            )
+            btn_reset_2d.clicked.connect(self.reset_2d_brightness)
+            self.slider_layout.addWidget(btn_reset_2d)
 
         # 2. Handle Collection Dropdown
         # We check if the strategy SUPPORTS components (like CollectionStrategy)
@@ -147,6 +163,12 @@ class TryOnControls(QWidget):
         # 3. Build Sliders
         definitions = strategy.get_slider_definitions()
         current_vals = strategy.settings
+        
+        # --- THE FIX: Drill down into 3D nested collections ---
+        if hasattr(strategy, 'active_component') and strategy.active_component:
+            if strategy.active_component in current_vals:
+                # Changes {"necklace": {"Scale": 120}} into {"Scale": 120} so the UI can read it!
+                current_vals = current_vals[strategy.active_component]
 
         for key, label_text, min_v, max_v, def_v, _ in definitions:
             # Safe get value
@@ -164,6 +186,7 @@ class TryOnControls(QWidget):
 
             # Slider (Built with safe signal connection)
             sld = self._build_slider(min_v, max_v, int(val), key)
+            self.dynamic_sliders[key] = sld
             
             # Value Label
             lbl_val = QLabel(str(int(val)))
@@ -240,3 +263,10 @@ class TryOnControls(QWidget):
             self.scene_sliders["Light_Gam"].setValue(10)
         if "Light_Amb" in self.scene_sliders:
             self.scene_sliders["Light_Amb"].setValue(100)
+
+    def reset_2d_brightness(self):
+        log.info("Resetting 2D brightness to original (100%).")
+        # Loop through whatever sliders currently exist
+        for key, sld in self.dynamic_sliders.items():
+            if "Bright" in key:
+                sld.setValue(100) # 100% is the exact original pixel values

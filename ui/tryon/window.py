@@ -193,11 +193,14 @@ class TryOnWindow(QWidget):
         if strategy :
             strategy.mode = mode
 
-            if item.settings:
-                if hasattr(strategy, 'update_settings'):
-                    strategy.update_settings(item.settings)
-                else:
-                    strategy.settings.update(item.settings)
+            # Only update settings here if it's NOT a collection.
+            # Collections must wait for the hard drive to load the files first!
+            if item.category != "Collection":
+                if item.settings:
+                    if hasattr(strategy, 'update_settings'):
+                        strategy.update_settings(item.settings)
+                    else:
+                        strategy.settings.update(item.settings)
 
         # Restore scene settings
         if item.settings and isinstance(item.settings, dict):
@@ -208,16 +211,18 @@ class TryOnWindow(QWidget):
                     self.viewer.fov = scene_cfg.get("Cam_FOV", self.viewer.fov)
 
         self.ai_worker.set_strategy(strategy)
-        self.controls.rebuild_sliders(strategy)
+        
+        # Only rebuild sliders here if it's NOT a collection.
+        if item.category != "Collection":
+            self.controls.rebuild_sliders(strategy)
         
         # We need to tell the AI Worker which mode to operate in,
-        # and give it the assets if it's a 2D collection
         if self.current_mode == "2d":
             if item.category == "Collection":
-                # Will load the folder in _process_pending_loads later
-                pass
+                pass # Handled in pending loads
             else:
                 self.ai_worker.set_active_collection([item], "2d")
+                self.controls.rebuild_sliders(self.ai_worker.strategy)
         else:
             # Tell AI worker we are in 3D mode
             self.ai_worker.set_active_collection([], "3d")
@@ -288,12 +293,17 @@ class TryOnWindow(QWidget):
                 log.info(f"Passing 2D sprites to AI Worker: {list(found_parts.keys())}")
                 items = list(found_parts.values())
                 self.ai_worker.set_active_collection(items, "2d")
+                
+                # Restore DB settings for 2D Collections and draw the UI
+                if self.pending_item.settings and self.ai_worker.strategy:
+                    self.ai_worker.strategy.update_settings(self.pending_item.settings)
+                self.controls.rebuild_sliders(self.ai_worker.strategy)
+                
             elif isinstance(self.ai_worker.strategy, CollectionStrategy):
                 self.ai_worker.strategy.load_components(found_parts)
                 if self.pending_item.settings:
                     self.ai_worker.strategy.update_settings(self.pending_item.settings)
                 self.controls.rebuild_sliders(self.ai_worker.strategy)
-
         # SCENARIO 2: SINGLE ITEM (NOT A FOLDER)
         else:
             if self.current_mode == "2d" and self.pending_item.image_2d_path:
@@ -320,13 +330,21 @@ class TryOnWindow(QWidget):
         elif key == "Light_Gam": self.viewer.gamma = val * 0.1
         elif key == "Light_Amb": self.viewer.ambient_str = val * 0.01
         self.viewer.update()
-
+    
     def save_settings(self):
         if self.current_item:
-            merged = {}
-            if self.ai_worker.strategy: merged.update(self.ai_worker.strategy.settings)
+            # 1. Start with existing DB settings so we don't wipe 2D when saving 3D (and vice versa!)
+            merged = dict(self.current_item.settings) if self.current_item.settings else {}
+            
+            # 2. Update with the current active strategy settings
+            if self.ai_worker.strategy: 
+                merged.update(self.ai_worker.strategy.settings)
+                
             merged["Scene"] = dict(self.scene_settings)
+            
+            # 3. Save to DB and instantly update memory so it's ready for the next click
             self.db.update_item_settings(self.current_item.id, merged)
+            self.current_item.settings = merged
 
     def toggle_cinema_mode(self):
         """Toggles Fullscreen and visibility of UI elements."""

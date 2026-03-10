@@ -116,19 +116,25 @@ class AIWorker(QThread):
         
         if mode == '2d':
             self.manager_2d.clear()
+            key_real = "necklace" # Default fallback
             for item in items:
                 if item.image_2d_path:
-                    # Parse final key from the path or name if it's a model
-                    # e.g "earring" "necklace"
                     key_hint = item.name.lower() + " " + item.image_2d_path.lower()
                     if "ear" in key_hint: key_real = "ear"
                     elif "neck" in key_hint: key_real = "necklace"
                     elif "nose" in key_hint: key_real = "nosepin"
-                    else: key_real = "forehead"  # Default fallback
+                    else: key_real = "forehead"  
                     
                     self.manager_2d.load_item(key_real, item.image_2d_path)
-            # Inject the 2D Strategy so TryOnControls builds the sliders
-            self.strategy = self.strategy_2d
+            
+            # Create the strategy and explicitly tell it what type of sliders to draw!
+            from trackers.strategies.strategy_2d import Strategy2D
+            self.strategy = Strategy2D(self.manager_2d, active_type=key_real)
+            # Load saved slider values from the Database
+            for item in items:
+                if hasattr(item, 'settings') and isinstance(item.settings, dict):
+                    self.strategy.update_settings(item.settings)
+
         self.settings_mutex.unlock()
 
     def set_strategy(self, strategy):
