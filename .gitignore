@@ -29,3 +29,4 @@ dist
 build
 main.spec
 Output
+app.log
