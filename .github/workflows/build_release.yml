@@ -38,10 +38,9 @@ jobs:
           pyinstaller --clean --noconfirm --onedir --console --add-data "data/assets;data/assets" --hidden-import mediapipe --collect-data mediapipe --icon "data/assets/icon.png" main.py
 
       - name: Compile Inno Setup Installer
-        # Windows runners on GitHub have Inno Setup pre-installed!
-        # The /DMyAppVersion flag injects the dynamic version into your .iss file
         run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="${{ env.VERSION }}" installer.iss
+          $version = "${env:VERSION}"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" installer.iss
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
