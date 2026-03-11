@@ -28,10 +28,10 @@ class CatalogueWidget(QWidget):
         h_header.setSpacing(18)
 
         brand_box = QVBoxLayout()
-        brand_title = QLabel("Sringar Jewellers")
+        brand_title = QLabel("AR Jewelry TryOn")
         brand_title.setObjectName("HeaderTitle")
         brand_title.setStyleSheet("font-size: 22px;")
-        brand_sub = QLabel("v2.0 Offline Client")
+        brand_sub = QLabel("Offline Client")
         brand_sub.setStyleSheet("color: #7fa2ff; font-weight: 600;")
         brand_box.addWidget(brand_title)
         brand_box.addWidget(brand_sub)

@@ -23,7 +23,7 @@ log = logger.bind(component="ui")
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Sringar Jewellers - Virtual Try-On")
+        self.setWindowTitle("AR Jewelry TryOn")
         self.resize(1280, 800)
         self.setStyleSheet(get_stylesheet())
         
@@ -126,7 +126,7 @@ class LicenseErrorDialog(QDialog):
         
         lbl_msg = QLabel(
             "Unregistered Device Detected.\n\n"
-            "Please copy the Hardware ID below and send it to Sringar Jewellers to activate your software license."
+            "Please copy the Hardware ID below and send it to Aspiron IT solution to activate your software license."
         )
         lbl_msg.setWordWrap(True)
         lbl_msg.setStyleSheet("font-size: 13px;")

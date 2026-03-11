@@ -31,7 +31,6 @@ PyOpenGL==3.1.10
 PyOpenGL-accelerate==3.1.10
 pyparsing==3.2.5
 PyQt5==5.15.11
-PyQt5-Qt5==5.15.18
 PyQt5_sip==12.17.1
 pyquaternion==0.9.9
 python-dateutil==2.9.0.post0
