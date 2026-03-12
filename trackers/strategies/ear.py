@@ -6,6 +6,7 @@ import math
 from .base import TrackingStrategy
 from utils.smoothing import OneEuroFilter
 from trackers.occluder_shared import OccluderManager
+from utils.paths import get_tracking_config
 
 class EarringStrategy(TrackingStrategy):
     def __init__(self):
@@ -83,8 +84,8 @@ class EarringStrategy(TrackingStrategy):
         yaw_deg = math.degrees(yaw_rad)
         
         # Threshold: How many degrees until the ear disappears?
-        # 35 to 45 degrees is usually the sweet spot.
-        TURN_LIMIT = 25.0 
+        config = get_tracking_config()
+        TURN_LIMIT = config["EAR_3D_TURN_LIMIT"]
 
         # If turning RIGHT (Positive Yaw), the Left Ear comes forward, Right Ear hides.
         # If turning LEFT (Negative Yaw), the Right Ear comes forward, Left Ear hides.

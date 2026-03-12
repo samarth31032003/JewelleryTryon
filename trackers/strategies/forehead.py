@@ -26,7 +26,7 @@ class ForeheadStrategy(TrackingStrategy):
             ("Scale", "Size", 1, 500, 150, 1.0),
 
             # 2. POSITION RATIOS
-            ("Up_Down", "Pos (Brows-Hair)", 0, 1000, 500, 1.0), 
+            ("Up_Down", "Pos (Brows-Hair)", -1000, 2000, 0, 1.0), 
             ("Side", "Side (Passa)", -1000, 1000, 0, 1.0),
             ("Fwd_Back", "Depth", -500, 500, 0, 1.0),
 

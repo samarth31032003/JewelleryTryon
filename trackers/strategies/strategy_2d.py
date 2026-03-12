@@ -1,6 +1,7 @@
 # trackers/strategies/strategy_2d.py
 from trackers.strategies.base import TrackingStrategy
 from utils.logger import logger
+from utils.paths import get_tracking_config
 
 log = logger.bind(component="ai")
 
@@ -139,11 +140,14 @@ class Strategy2D(TrackingStrategy):
             import math
             yaw_deg = math.degrees(math.atan2(dz, dx))
             
+            config = get_tracking_config()
+            TURN_LIMIT = config["EAR_2D_TURN_LIMIT"]
+            NOSE_TURN_LIMIT = config["NOSE_2D_TURN_LIMIT"]
+
             # ==========================================
             # 4A. Apply Visibility Logic for Earrings
             # ==========================================
             if "ear" in self.manager_2d.overlays:
-                TURN_LIMIT = 20.0 
                 overlay = self.manager_2d.overlays["ear"]
                 
                 # Ensure the flags exist on the object
@@ -190,8 +194,6 @@ class Strategy2D(TrackingStrategy):
                 # If final_pin_x < nose_tip_x, it is on the Screen-Left (User's Right Nostril)
                 is_screen_right = final_pin_x > nose_tip_x
 
-                NOSE_TURN_LIMIT = 15.0 
-                
                 # 5. Apply the correct hiding logic based on its true physical location
                 if is_screen_right and yaw_deg > NOSE_TURN_LIMIT:
                     # Pin is on Screen-Right, user turned Right -> Hide
