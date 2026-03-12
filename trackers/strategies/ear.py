@@ -77,16 +77,29 @@ class EarringStrategy(TrackingStrategy):
         R_head[:3, 1] = vec_up
         R_head[:3, 2] = vec_fwd
 
-        # Left Earring
-        mat_L = self._build_matrix(pos_L, R_head, is_left=True)
-        cmds.append({'type': 'mesh', 'matrix': mat_L})
+        # Extract the Yaw (Y-axis rotation) from the rotation matrix
+        # A positive yaw means looking Left. A negative yaw means looking Right.
+        yaw_rad = math.asin(np.clip(-R_head[2, 0], -1.0, 1.0))
+        yaw_deg = math.degrees(yaw_rad)
         
-        # Right Earring
-        mat_R = self._build_matrix(pos_R, R_head, is_left=False)
-        cmds.append({'type': 'mesh', 'matrix': mat_R})
+        # Threshold: How many degrees until the ear disappears?
+        # 35 to 45 degrees is usually the sweet spot.
+        TURN_LIMIT = 25.0 
+
+        # If turning RIGHT (Positive Yaw), the Left Ear comes forward, Right Ear hides.
+        # If turning LEFT (Negative Yaw), the Right Ear comes forward, Left Ear hides.
         
+        # Left Earring - Draw it as long as they aren't looking too far Right
+        if yaw_deg < TURN_LIMIT:
+            mat_L = self._build_matrix(pos_L, R_head, is_left=True)
+            cmds.append({'type': 'mesh', 'matrix': mat_L})
+        
+        # Right Earring - Draw it as long as they aren't looking too far Left
+        if yaw_deg > -TURN_LIMIT:
+            mat_R = self._build_matrix(pos_R, R_head, is_left=False)
+            cmds.append({'type': 'mesh', 'matrix': mat_R})
+
         # --- 3. SHARED OCCLUDER ---
-        # Calculate Head Center (Midpoint of cheeks)
         p_head_center = (p_left + p_right) / 2.0      
         mat_occ = OccluderManager.get_head_matrix(self.settings, p_head_center, R_head)
         cmds.append({

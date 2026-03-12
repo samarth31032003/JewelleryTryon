@@ -120,5 +120,86 @@ class Strategy2D(TrackingStrategy):
             log.warning(f"🚨 [TRIPWIRE 3] Injected into {key} overlay. New Scale: {overlay.scale}")
 
     def process_frame(self, results, width, height):
-        """Bypass all 3D matrix math"""
+        """Bypass all 3D matrix math, but apply 2D culling for ears and nose pins."""
+        
+        # 1. Check if we need to do math at all
+        needs_culling = "ear" in self.manager_2d.overlays or "nosepin" in self.manager_2d.overlays
+        
+        if needs_culling and results and hasattr(results, 'face_landmarks') and results.face_landmarks:
+            lms = results.face_landmarks.landmark
+            
+            # 2. Grab normalized 3D positions of Left Temple (234) and Right Temple (454)
+            p_left = lms[234]
+            p_right = lms[454]
+            
+            # 3. Calculate Yaw (Left/Right turn) using the Z-depth difference
+            dx = p_right.x - p_left.x
+            dz = p_right.z - p_left.z
+            
+            import math
+            yaw_deg = math.degrees(math.atan2(dz, dx))
+            
+            # ==========================================
+            # 4A. Apply Visibility Logic for Earrings
+            # ==========================================
+            if "ear" in self.manager_2d.overlays:
+                TURN_LIMIT = 20.0 
+                overlay = self.manager_2d.overlays["ear"]
+                
+                # Ensure the flags exist on the object
+                if not hasattr(overlay, 'hide_left'):
+                    overlay.hide_left = False
+                    overlay.hide_right = False
+
+                if yaw_deg > TURN_LIMIT:
+                    # Turning Right (Mirror) -> Hide Right Ear
+                    overlay.hide_left = False
+                    overlay.hide_right = True
+                elif yaw_deg < -TURN_LIMIT:
+                    # Turning Left (Mirror) -> Hide Left Ear
+                    overlay.hide_left = True
+                    overlay.hide_right = False
+                else:
+                    overlay.hide_left = False
+                    overlay.hide_right = False
+
+            # ==========================================
+            # 4B. Apply Visibility Logic for Nose Pin (DYNAMIC)
+            # ==========================================
+            if "nosepin" in self.manager_2d.overlays:
+                np_overlay = self.manager_2d.overlays["nosepin"]
+                if not hasattr(np_overlay, 'hide'):
+                    np_overlay.hide = False
+                
+                # 1. Get the exact center of the nose (Nose Tip)
+                nose_tip_x = lms[1].x
+                
+                # 2. Get the anchor point the overlay is currently using
+                if getattr(np_overlay, 'side', 'left') == "left":
+                    anchor_x = (lms[129].x + lms[219].x) / 2
+                else:
+                    anchor_x = (lms[358].x + lms[439].x) / 2
+
+                # 3. Calculate exactly where the user dragged the sticker
+                # offset_x is in pixels, so we divide by width to match the 0.0-1.0 landmark scale
+                normalized_offset_x = np_overlay.offset_x / width
+                final_pin_x = anchor_x + normalized_offset_x
+
+                # 4. Determine which side of the face the pin is ACTUALLY on
+                # If final_pin_x > nose_tip_x, it is on the Screen-Right (User's Left Nostril)
+                # If final_pin_x < nose_tip_x, it is on the Screen-Left (User's Right Nostril)
+                is_screen_right = final_pin_x > nose_tip_x
+
+                NOSE_TURN_LIMIT = 15.0 
+                
+                # 5. Apply the correct hiding logic based on its true physical location
+                if is_screen_right and yaw_deg > NOSE_TURN_LIMIT:
+                    # Pin is on Screen-Right, user turned Right -> Hide
+                    np_overlay.hide = True
+                elif not is_screen_right and yaw_deg < -NOSE_TURN_LIMIT:
+                    # Pin is on Screen-Left, user turned Left -> Hide
+                    np_overlay.hide = True
+                else:
+                    np_overlay.hide = False
+
         return []

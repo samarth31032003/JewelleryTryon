@@ -134,6 +134,10 @@ class EarringOverlay(BaseOverlay2D):
         super().__init__(image_path)
         self.offset_y = 10
         self.mirror_right = True
+        
+        # Visibility Flags
+        self.hide_left = False
+        self.hide_right = False
 
     def overlay_on_frame(self, frame, left_ear, right_ear, face_width=None):
         if self.original_image is None: return frame
@@ -141,10 +145,16 @@ class EarringOverlay(BaseOverlay2D):
         base_size = int(face_width * 0.25 * self.scale) if face_width else int(60 * self.scale)
         base_size = max(20, min(300, base_size))
         
-        if left_ear:
+        # Fetch the flags dynamically updated by Strategy2D
+        hide_left = getattr(self, 'hide_left', False)
+        hide_right = getattr(self, 'hide_right', False)
+        
+        # Draw Left Earring ONLY if it is not hidden
+        if left_ear and not hide_left:
             frame = self.prepare_and_blend(frame, left_ear[0], left_ear[1], base_size, y_anchor='top')
                 
-        if right_ear:
+        # Draw Right Earring ONLY if it is not hidden
+        if right_ear and not hide_right:
             old_ox = self.offset_x
             self.offset_x = -old_ox # Invert X offset for right ear
             frame = self.prepare_and_blend(frame, right_ear[0], right_ear[1], base_size, side_flip=self.mirror_right, y_anchor='top')
@@ -156,16 +166,23 @@ class EarringOverlay(BaseOverlay2D):
 class NosePinOverlay(BaseOverlay2D):
     def __init__(self, image_path=None):
         super().__init__(image_path)
-        self.side = "left"
+        # Your existing code already had this side tracking!
+        self.side = "left" 
+        
+        # Visibility Flag
+        self.hide = False
 
     def overlay_on_frame(self, frame, nose_point, face_width=None, head_tilt=0):
+        # Check if Strategy2D told us to hide
+        if getattr(self, 'hide', False): 
+            return frame
+            
         if self.original_image is None or nose_point is None: return frame
             
         base_size = int(face_width * 0.08 * self.scale) if face_width else int(25 * self.scale)
         base_size = max(10, min(100, base_size))
         
         return self.prepare_and_blend(frame, nose_point[0], nose_point[1], base_size, head_tilt=head_tilt, side_flip=(self.side=="right"), y_anchor='center')
-
 
 class NecklaceOverlay(BaseOverlay2D):
     def __init__(self, image_path=None):
