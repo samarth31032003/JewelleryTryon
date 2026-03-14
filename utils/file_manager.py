@@ -98,23 +98,63 @@ class LibraryManager:
             return None
 
     @staticmethod
-    def delete_item(model_path_from_db):
-        """Safely deletes the item's folder."""
-        if not model_path_from_db: return
+    def _safe_delete_file(file_path):
+        """Internal helper to securely delete a single file with logging."""
+        if not file_path: return
         
-        full_path = USER_DATA_ROOT / model_path_from_db
-        
-        # If DB path is a file (Single Item), delete its parent folder
-        if full_path.is_file():
-            folder_to_delete = full_path.parent
-        # If DB path is a folder (Collection), delete it directly
-        else:
-            folder_to_delete = full_path
+        target = USER_DATA_ROOT / file_path
+        if not target.exists():
+            log.warning(f"Delete Skipped: File does not exist -> {target}")
+            return
             
-        # Security: Ensure we are inside 'data/models'
-        if MODELS_DIR.resolve() not in folder_to_delete.resolve().parents and MODELS_DIR.resolve() != folder_to_delete.resolve():
-            log.warning("Security Block: Attempted to delete external path.")
+        # Security: Prevent escaping the app directory
+        if USER_DATA_ROOT.resolve() not in target.resolve().parents:
+            log.warning(f"Security Block: Attempted to delete external file -> {target}")
             return
 
-        if folder_to_delete.exists():
-            shutil.rmtree(folder_to_delete, ignore_errors=True)
+        try:
+            os.remove(target)
+            log.info(f"[SUCCESS] Deleted File: {target.name}")
+        except PermissionError:
+            log.error(f"[LOCKED] Windows blocked deletion (File in use?): {target.name}")
+        except Exception as e:
+            log.error(f"[ERROR] Failed to delete {target.name}: {e}")
+
+    @staticmethod
+    def delete_all_item_assets(target_item):
+        """
+        Takes a JewelryItem object and systematically purges every file 
+        (3D folder, 2D PNG, and Thumbnail) associated with it.
+        """
+        log.info(f"Purging assets for Item {target_item.id}: {target_item.name}")
+        
+        # 1. Delete the Thumbnail
+        if target_item.thumbnail_path:
+            LibraryManager._safe_delete_file(target_item.thumbnail_path)
+            
+        # 2. Delete the 2D Image (THIS WAS THE MISSING STEP!)
+        if target_item.image_2d_path:
+            LibraryManager._safe_delete_file(target_item.image_2d_path)
+
+        # 3. Delete the 3D Model Folder
+        if target_item.model_path:
+            full_path = USER_DATA_ROOT / target_item.model_path
+            
+            # If DB path is a file (Single Item), target its parent folder
+            if full_path.is_file():
+                folder_to_delete = full_path.parent
+            # If DB path is a folder (Collection), target it directly
+            else:
+                folder_to_delete = full_path
+                
+            # Security: Ensure we are inside 'data/models'
+            if MODELS_DIR.resolve() not in folder_to_delete.resolve().parents and MODELS_DIR.resolve() != folder_to_delete.resolve():
+                log.warning("Security Block: Attempted to delete external folder.")
+                return
+
+            if folder_to_delete.exists():
+                try:
+                    shutil.rmtree(folder_to_delete, ignore_errors=True)
+                    log.info(f"[SUCCESS] Deleted 3D Folder: {folder_to_delete.name}")
+                except Exception as e:
+                    log.error(f"[ERROR] Failed to delete 3D Folder {folder_to_delete.name}: {e}")

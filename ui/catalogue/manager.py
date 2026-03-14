@@ -234,7 +234,7 @@ class CatalogueWidget(QWidget):
     def delete_item(self, item_id):
         confirm = QMessageBox.question(
             self, "Confirm Delete", 
-            "Are you sure you want to delete this item?\nThis will remove the file from your library.",
+            "Are you sure you want to delete this item?\nThis will remove ALL files (2D, 3D, and Thumbnails) from your library.",
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
@@ -242,13 +242,11 @@ class CatalogueWidget(QWidget):
             target_item = next((i for i in all_items if i.id == item_id), None)
             
             if target_item:
-                # 1. Delete the Model Folder
-                # delete_item() calculates the parent folder automatically
-                LibraryManager.delete_item(target_item.model_path)
+                # 1. Ask the Library Manager to safely purge all physical files
+                from utils.file_manager import LibraryManager
+                LibraryManager.delete_all_item_assets(target_item)
                 
-                # 2. Delete Thumbnail
-                if target_item.thumbnail_path:
-                    target = Path(target_item.thumbnail_path).resolve() #simple resolver for safety.
-                    os.remove(target)
-            self.db.delete_item(item_id)
+                # 2. Remove the record from the Database
+                self.db.delete_item(item_id)
+                
             self.refresh_all_grids()

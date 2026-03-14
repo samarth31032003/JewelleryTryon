@@ -37,7 +37,7 @@ class Strategy2D(TrackingStrategy):
         
         if self.active_type == "necklace":
             sliders.extend([
-                ("Neck2D_Scale", "Necklace Scale (%)", 10, 300, 100, 100.0),
+                ("Neck2D_Scale", "Necklace Scale (%)", 0, 300, 100, 100.0),
                 ("Neck2D_OffsetX", "Necklace Offset X", -300, 300, 0, 1.0),
                 ("Neck2D_OffsetY", "Necklace Offset Y", -300, 300, 0, 1.0),
                 ("Neck2D_Bright", "Necklace Brightness (%)", 10, 300, 100, 100.0),
@@ -46,7 +46,7 @@ class Strategy2D(TrackingStrategy):
             
         elif self.active_type == "ear":
             sliders.extend([
-                ("Ear2D_Scale", "Earring Scale (%)", 10, 300, 100, 100.0),
+                ("Ear2D_Scale", "Earring Scale (%)", 0, 300, 100, 100.0),
                 ("Ear2D_OffsetX", "Earring Offset X", -300, 300, 0, 1.0),
                 ("Ear2D_OffsetY", "Earring Offset Y", -300, 300, 0, 1.0),
                 ("Ear2D_Bright", "Earring Brightness (%)", 10, 300, 100, 100.0)
@@ -54,7 +54,7 @@ class Strategy2D(TrackingStrategy):
             
         elif self.active_type == "nosepin":
             sliders.extend([
-                ("Nose2D_Scale", "NosePin Scale (%)", 10, 300, 100, 100.0),
+                ("Nose2D_Scale", "NosePin Scale (%)", 0, 300, 100, 100.0),
                 ("Nose2D_OffsetX", "NosePin Offset X", -300, 300, 0, 1.0),
                 ("Nose2D_OffsetY", "NosePin Offset Y", -300, 300, 0, 1.0),
                 ("Nose2D_Bright", "NosePin Brightness (%)", 10, 300, 100, 100.0)
@@ -62,7 +62,7 @@ class Strategy2D(TrackingStrategy):
             
         elif self.active_type == "forehead":
             sliders.extend([
-                ("Head2D_Scale", "Forehead Scale (%)", 10, 300, 100, 100.0),
+                ("Head2D_Scale", "Forehead Scale (%)", 0, 300, 100, 100.0),
                 ("Head2D_OffsetX", "Forehead Offset X", -300, 300, 0, 1.0),
                 ("Head2D_OffsetY", "Forehead Offset Y", -300, 300, 0, 1.0),
                 ("Head2D_Bright", "Forehead Brightness (%)", 10, 300, 100, 100.0)

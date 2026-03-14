@@ -33,9 +33,8 @@ jobs:
         run: echo "VERSION=1.0.${{ github.run_number }}" >> $env:GITHUB_ENV
 
       - name: Build with PyInstaller
-        # Your exact working PyInstaller command
         run: |
-          pyinstaller --clean --noconfirm --onedir --console --add-data "data/assets;data/assets" --hidden-import mediapipe --collect-data mediapipe --icon "data/assets/icon.png" main.py
+          pyinstaller --clean --noconfirm --onedir --noconsole --add-data "data/assets;data/assets" --hidden-import mediapipe --collect-data mediapipe --icon "data/assets/icon.png" main.py
 
       - name: Compile Inno Setup Installer
         run: |

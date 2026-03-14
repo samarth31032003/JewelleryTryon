@@ -114,25 +114,48 @@ class AIWorker(QThread):
         self.settings_mutex.lock()
         self.active_mode = mode
         
+        log.info(f"[AI Routing] Switching to mode: '{mode}' with {len(items)} items.")
+        
         if mode == '2d':
             self.manager_2d.clear()
             key_real = "necklace" # Default fallback
+            
             for item in items:
                 if item.image_2d_path:
-                    key_hint = item.name.lower() + " " + item.image_2d_path.lower()
-                    if "ear" in key_hint: key_real = "ear"
-                    elif "neck" in key_hint: key_real = "necklace"
-                    elif "nose" in key_hint: key_real = "nosepin"
-                    else: key_real = "forehead"  
+                    # --- 1. EXHAUSTIVE LOGGING: Track the inputs ---
+                    log.info(f"[2D Router] Analyzing Item -> ID: {item.id}, Name: '{item.name}'")
+                    log.info(f"[2D Router] DB Category: '{getattr(item, 'category', 'UNKNOWN')}'")
+                    log.info(f"[2D Router] 2D Image Path: '{item.image_2d_path}'")
                     
+                    # 2. Get the actual Database Category
+                    cat_lower = item.category.lower() if hasattr(item, 'category') and item.category else ""
+                    
+                    # 3. Fallback name/path (helpful if category is a generic "Collection")
+                    key_hint = item.name.lower() + " " + item.image_2d_path.lower()
+                    
+                    # 4. The Decision Tree
+                    if "ear" in cat_lower or "ear" in key_hint: 
+                        key_real = "ear"
+                    elif "neck" in cat_lower or "neck" in key_hint: 
+                        key_real = "necklace"
+                    elif "nose" in cat_lower or "nose" in key_hint: 
+                        key_real = "nosepin"
+                    else: 
+                        log.warning(f"⚠️ [2D Router] Could not identify type for '{item.name}'. Defaulting to forehead!")
+                        key_real = "forehead"  
+                        
+                    # 5. Log the final decision
+                    log.info(f"[2D Router] Assigned Strategy: {key_real.upper()}")
                     self.manager_2d.load_item(key_real, item.image_2d_path)
             
             # Create the strategy and explicitly tell it what type of sliders to draw!
             from trackers.strategies.strategy_2d import Strategy2D
             self.strategy = Strategy2D(self.manager_2d, active_type=key_real)
+            
             # Load saved slider values from the Database
             for item in items:
                 if hasattr(item, 'settings') and isinstance(item.settings, dict):
+                    log.info(f"[2D Router] Applying saved settings for {item.name}")
                     self.strategy.update_settings(item.settings)
 
         self.settings_mutex.unlock()
@@ -145,7 +168,7 @@ class AIWorker(QThread):
 
     def update_settings(self, new_settings):
         """Updates slider values safely."""
-        log.warning(f"🚨 [TRIPWIRE 1] AIWorker received: {new_settings}")
+        log.warning(f"[TRIPWIRE 1] AIWorker received: {new_settings}")
         
         self.settings_mutex.lock()
         if self.strategy:
